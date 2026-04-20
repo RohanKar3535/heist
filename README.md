@@ -1,7 +1,7 @@
 # HEIST 🔍: AI Detective vs AI Criminal
 
 **A Co-Evolving Multi-Agent Environment for Money Laundering Detection**  
-Built for the Meta Hackathon Finals.
+Built for the Hackathon Finals.
 
 > *"An AI detective and an AI criminal. Neither has hardcoded knowledge. The criminal writes its own attack code. Both co-evolve for 50 episodes. At the end, the criminal generates a novel money laundering pattern that no human designed — and our trained investigator still can’t fully catch it."*
 
