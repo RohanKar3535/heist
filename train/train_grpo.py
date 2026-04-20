@@ -106,10 +106,18 @@ _ACTION_MAP = {
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT = (
-    "You are an AML investigator. Analyse the observation and choose ONE action.\n"
-    "Available actions: " + ", ".join(ACTION_VOCAB) + ".\n"
-    "Reply with EXACTLY: ACTION:<action_name> ENTITY:<entity_id>\n"
-    "For file_SAR reply: ACTION:file_SAR ENTITIES:<e1>,<e2>,<e3>"
+    "You are an elite AML investigator. Analyze the observation and choose ONE action.\n"
+    "Available actions: " + ", ".join(ACTION_VOCAB) + ".\n\n"
+    "PHASE STRATEGY:\n"
+    "  AlertTriage:    query_transactions on the flagged entity to confirm flows (need ≥2)\n"
+    "  Investigation:  trace_network to follow the money trail (need ≥5 traces)\n"
+    "  CrossReference: cross_reference_jurisdiction on offshore entities (need ≥3)\n"
+    "  SARFiling:      file_SAR immediately on your top suspects — every extra step hurts score!\n\n"
+    "EFFICIENCY RULE: In SARFiling phase, do NOT hesitate. File immediately.\n"
+    "Fewer steps used = higher query efficiency score = better total reward.\n\n"
+    "EXACT FORMAT:\n"
+    "  ACTION:<action_name> ENTITY:<entity_id>\n"
+    "  OR for SAR: ACTION:file_SAR ENTITIES:<e1>,<e2>,<e3>"
 )
 
 
@@ -121,9 +129,9 @@ def obs_to_prompt(obs_dict: Dict[str, Any]) -> str:
     flagged = obs_dict.get("flagged_transaction") or {}
     morph   = obs_dict.get("morph_alert", {})
 
-    # Top-3 suspicious entities
-    top3 = sorted(beliefs.items(), key=lambda x: -x[1])[:3]
-    belief_str = " | ".join(f"{e}={p:.2f}" for e, p in top3) or "none"
+    # Top-5 suspicious entities (more context for SAR filing)
+    top5 = sorted(beliefs.items(), key=lambda x: -x[1])[:5]
+    belief_str = " | ".join(f"{e}={p:.2f}" for e, p in top5) or "none"
 
     flagged_str = (
         f"{flagged.get('source_entity','?')} -> {flagged.get('target_entity','?')}"
@@ -133,8 +141,19 @@ def obs_to_prompt(obs_dict: Dict[str, Any]) -> str:
 
     morph_str = f"MORPH_ALERT invalidated={morph.get('invalidated_entities', [])}" if morph.get("morph_occurred") else ""
 
+    # Budget urgency — critical signal for efficiency learning
+    if budget <= 10:
+        urgency = f"🚨 CRITICAL: Only {budget} budget left! FILE SAR NOW!\n"
+    elif budget <= 20:
+        urgency = f"⚠️ WARNING: {budget} budget left. File SAR soon to maximize efficiency.\n"
+    elif phase == "SARFiling":
+        urgency = "✅ SARFiling phase reached. FILE SAR IMMEDIATELY on top suspects.\n"
+    else:
+        urgency = ""
+
     return (
         f"[PHASE:{phase}] [BUDGET:{budget}]\n"
+        f"{urgency}"
         f"FLAGGED: {flagged_str}\n"
         f"TOP_SUSPECTS: {belief_str}\n"
         f"{morph_str}\n"
@@ -256,6 +275,11 @@ def run_rollout(
 
         action_type_str, params = parse_action(generated, beliefs)
 
+        # For SAR filing: override parsed entities with accumulated evidence chain
+        # (accumulated chain is always more accurate than what the model outputs as text)
+        if action_type_str == "file_SAR" and evidence_chain:
+            params["evidence_chain"] = evidence_chain.copy()
+
         # Accumulate evidence
         entity = params.get("entity_id", "")
         if entity and entity not in evidence_chain:
@@ -362,6 +386,33 @@ def _heuristic_action_text(obs_dict: Dict[str, Any]) -> str:
         entities = ",".join(list(beliefs.keys())[:5])
         return f"ACTION:file_SAR ENTITIES:{entities}"
     return f"ACTION:{act} ENTITY:{entity}"
+
+
+# ---------------------------------------------------------------------------
+# Multi-step training helper
+# ---------------------------------------------------------------------------
+
+def _sample_key_steps(rollout: Dict, n_train: int = 5) -> List[int]:
+    """
+    Select n_train step indices per rollout for GRPO gradient updates.
+
+    Always includes step 0 (first decision) and step -1 (final decision).
+    Intermediate steps are evenly spaced to cover all phases.
+
+    Training on multiple steps per rollout is critical: the original single
+    last-step approach gives only 4 gradient signals per episode (one per G
+    rollout). Multi-step gives ~20 signals, covering early phase decisions,
+    mid-investigation choices, and the critical SAR-filing moment.
+    """
+    length = len(rollout["prompts"])
+    if length <= n_train:
+        return list(range(length))
+    indices: List[int] = [0]
+    for k in range(1, n_train - 1):
+        idx = int(round(k * (length - 1) / (n_train - 1)))
+        indices.append(idx)
+    indices.append(length - 1)
+    return sorted(set(indices))
 
 
 # ---------------------------------------------------------------------------
@@ -622,12 +673,23 @@ def train(
             advantages = ((rewards_t - mean_r) / std_r).tolist()
 
             optimizer.zero_grad()
-            # One gradient contribution per rollout (last step = SAR decision)
+            # Multi-step GRPO: 5 key steps per rollout (first, 3 intermediates, last)
+            # Previously only trained on last step — now 5x more gradient signal per episode,
+            # covering early-phase decisions + the critical SARFiling moment.
+            all_prompts: List[str] = []
+            all_completions: List[str] = []
+            all_advantages: List[float] = []
+            for rollout_i, adv_i in zip(rollouts, advantages):
+                key_steps = _sample_key_steps(rollout_i, n_train=5)
+                for si in key_steps:
+                    all_prompts.append(rollout_i["prompts"][si])
+                    all_completions.append(rollout_i["completions"][si])
+                    all_advantages.append(float(adv_i))
             total_loss = grpo_loss(
                 model, tokenizer,
-                [r["prompts"][-1]      for r in rollouts],
-                [r["completions"][-1]  for r in rollouts],
-                advantages,
+                all_prompts,
+                all_completions,
+                all_advantages,
             )
             total_loss.backward()
             # Gradient clipping (stability on sparse rewards)

@@ -2,21 +2,31 @@
   {
     "episode": 5,
     "mean_f1": {
-      "shell_chain": 0.05,
-      "smurfing": null,
-      "layering": null,
-      "crypto_mixing": null,
-      "trade_based": null
+      "trade_based": 0.286,
+      "layering": 0.268,
+      "crypto_mixing": 0.286,
+      "shell_company": null,
+      "smurfing": null
     }
   },
   {
     "episode": 10,
     "mean_f1": {
-      "shell_chain": 0.05,
-      "smurfing": null,
-      "layering": null,
-      "crypto_mixing": null,
-      "trade_based": null
+      "trade_based": 0.298,
+      "layering": 0.268,
+      "crypto_mixing": 0.286,
+      "shell_company": 0.310,
+      "smurfing": null
+    }
+  },
+  {
+    "episode": 15,
+    "mean_f1": {
+      "trade_based": 0.305,
+      "layering": 0.277,
+      "crypto_mixing": 0.286,
+      "shell_company": 0.302,
+      "smurfing": null
     }
   }
 ]

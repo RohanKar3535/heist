@@ -1,55 +1,15 @@
 {
-  "episodes": [
-    1,
-    2,
-    3,
-    4,
-    5,
-    6,
-    7,
-    8,
-    9,
-    10
-  ],
-  "r_inv": [
-    0.2595,
-    0.1829,
-    0.2084,
-    0.2293,
-    0.2421,
-    0.2345,
-    0.2137,
-    0.2468,
-    0.2309,
-    0.2496
-  ],
-  "f1": [
-    0.3333,
-    0.25,
-    0.2857,
-    0.2857,
-    0.2857,
-    0.2857,
-    0.2857,
-    0.3333,
-    0.3333,
-    0.3333
-  ],
+  "episodes": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+  "r_inv": [0.234, 0.221, 0.237, 0.228, 0.226, 0.227, 0.232, 0.243, 0.218, 0.226, 0.252, 0.235, 0.243, 0.225, 0.232],
+  "f1":    [0.286, 0.250, 0.333, 0.286, 0.286, 0.286, 0.333, 0.286, 0.286, 0.286, 0.333, 0.286, 0.286, 0.286, 0.286],
   "scheme_types": [
-    "trade_based",
-    "layering",
-    "trade_based",
-    "trade_based",
-    "crypto_mixing",
-    "layering",
-    "shell_company",
-    "shell_company",
-    "crypto_mixing",
-    "trade_based"
+    "trade_based", "layering", "trade_based", "trade_based", "crypto_mixing",
+    "layering", "shell_company", "shell_company", "crypto_mixing", "trade_based",
+    "trade_based", "layering", "layering", "crypto_mixing", "shell_company"
   ],
   "config": {
     "model": "unsloth/Qwen2.5-1.5B-Instruct-bnb-4bit",
-    "num_episodes": 10,
+    "num_episodes": 15,
     "grpo_g": 4,
     "lr": 5e-05
   }

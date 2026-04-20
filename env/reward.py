@@ -31,10 +31,10 @@ except ImportError:
 
 DEFAULT_WEIGHTS: Dict[str, float] = {
     "w1_detection_f1":            0.50,
-    "w2_evidence_quality":        0.30,
-    "w3_query_efficiency":        0.05,
-    "w4_jurisdiction_compliance": 0.05,
-    "w5_false_positive_penalty":  0.05,
+    "w2_evidence_quality":        0.25,   # reduced from 0.30; efficiency gets the headroom
+    "w3_query_efficiency":        0.15,   # tripled from 0.05; key signal for early SAR filing
+    "w4_jurisdiction_compliance": 0.04,   # slightly reduced
+    "w5_false_positive_penalty":  0.04,   # slightly reduced
     "w6_novel_scheme_bonus":      0.025,
     "w7_missed_novel_penalty":    0.025,
 }
