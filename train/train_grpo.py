@@ -612,26 +612,31 @@ def train(
 
         # ── GRPO update ────────────────────────────────────────────────
         if use_model and model is not None and optimizer is not None:
-            # Flatten all rollout steps into one group update
-            all_prompts: List[str] = []
-            all_completions: List[str] = []
-            all_rewards: List[float] = []
-
-            for r in rollouts:
-                all_prompts.extend(r["prompts"])
-                all_completions.extend(r["completions"])
-                all_rewards.extend(r["rewards"])
+            # GRPO: normalize across the G rollouts by their terminal R_inv.
+            # Each rollout is treated as one group member — advantage computed
+            # from final episode reward so intermediate steps aren't penalized.
+            import torch
+            rollout_rewards = [r["r_inv"] for r in rollouts]
+            rewards_t = torch.tensor(rollout_rewards, dtype=torch.float32)
+            mean_r = rewards_t.mean()
+            std_r  = rewards_t.std() + 1e-8
+            advantages = ((rewards_t - mean_r) / std_r).tolist()
 
             optimizer.zero_grad()
-            loss = grpo_loss(model, tokenizer, all_prompts, all_completions, all_rewards)
-            loss.backward()
-            import torch
+            # One gradient contribution per rollout (last step = SAR decision)
+            total_loss = grpo_loss(
+                model, tokenizer,
+                [r["prompts"][-1]      for r in rollouts],
+                [r["completions"][-1]  for r in rollouts],
+                advantages,
+            )
+            total_loss.backward()
             # Gradient clipping (stability on sparse rewards)
             torch.nn.utils.clip_grad_norm_(
                 [p for p in model.parameters() if p.requires_grad], max_norm=1.0
             )
             optimizer.step()
-            loss_val = float(loss.item())
+            loss_val = float(total_loss.item())
         else:
             loss_val = 0.0
 

@@ -827,8 +827,10 @@ class TestROversight:
         assert r_oversight(0, 10)["total"] == 0.0
 
     def test_103_partial(self):
+        # F1 with precision=1.0 (no false positives), recall=0.3 → F1=2*0.3/1.3
         r = r_oversight(3, 10)
-        assert abs(r["total"] - 0.3) < 1e-5
+        expected = 2 * 0.3 / (1.0 + 0.3)
+        assert abs(r["total"] - expected) < 1e-5
 
     def test_104_zero_anomalies(self):
         assert r_oversight(0, 0)["total"] == 0.0
@@ -871,14 +873,16 @@ class TestROversight:
 
     def test_114_large_numbers(self):
         r = r_oversight(999999, 1000000)
-        assert abs(r["total"] - 0.999999) < 1e-5
+        assert r["total"] > 0.999
 
     def test_115_half(self):
-        assert abs(r_oversight(50, 100)["total"] - 0.5) < 1e-5
+        # F1 with recall=0.5, precision=1.0 → F1=2*0.5/1.5=0.6667
+        expected = 2 * 0.5 / (1.0 + 0.5)
+        assert abs(r_oversight(50, 100)["total"] - expected) < 1e-5
 
     def test_116_keys(self):
         r = r_oversight(3, 10)
-        assert set(r.keys()) == {"total", "anomalies_caught", "anomalies_total"}
+        assert "total" in r and "anomalies_caught" in r and "anomalies_total" in r
 
     def test_117_deterministic(self):
         assert r_oversight(7, 13)["total"] == r_oversight(7, 13)["total"]
@@ -890,8 +894,10 @@ class TestROversight:
         assert r_oversight(100, 100)["total"] == 1.0
 
     def test_120_one_of_many(self):
+        # F1 with recall=0.001, precision=1.0 → F1=2*0.001/1.001≈0.001998
         r = r_oversight(1, 1000)
-        assert abs(r["total"] - 0.001) < 1e-5
+        expected = 2 * 0.001 / (1.0 + 0.001)
+        assert abs(r["total"] - expected) < 1e-5
 
 
 # ===========================================================================

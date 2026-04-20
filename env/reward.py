@@ -286,25 +286,38 @@ def r_criminal(
 def r_oversight(
     anomalies_caught: int,
     anomalies_total: int,
+    false_positives: int = 0,
 ) -> Dict[str, Any]:
     """
-    Oversight agent reward: R = anomalies_caught / anomalies_total.
+    Oversight agent reward: F1 over anomaly detection to prevent trivial all-flag policy.
 
     Args:
-        anomalies_caught: number of anomalies correctly flagged
-        anomalies_total:  total anomalies present
+        anomalies_caught: true positives (anomalies correctly flagged)
+        anomalies_total:  total anomalies present (for recall)
+        false_positives:  benign transactions incorrectly flagged
 
-    Returns dict with total.
+    Returns dict with total (F1) and components.
     """
+    anomalies_caught = max(0, anomalies_caught)
+    false_positives  = max(0, false_positives)
+
     if anomalies_total <= 0:
-        ratio = 0.0
-    else:
-        ratio = min(anomalies_caught / anomalies_total, 1.0)
+        return {"total": 0.0, "precision": 0.0, "recall": 0.0,
+                "anomalies_caught": anomalies_caught, "anomalies_total": anomalies_total,
+                "false_positives": false_positives}
+
+    recall    = min(anomalies_caught / anomalies_total, 1.0)
+    predicted = anomalies_caught + false_positives
+    precision = anomalies_caught / max(predicted, 1)
+    f1 = (2.0 * precision * recall) / max(precision + recall, 1e-9)
 
     return {
-        "total":            round(ratio, 6),
+        "total":            round(f1, 6),
+        "precision":        round(precision, 6),
+        "recall":           round(recall, 6),
         "anomalies_caught": anomalies_caught,
         "anomalies_total":  anomalies_total,
+        "false_positives":  false_positives,
     }
 
 
