@@ -52,13 +52,12 @@ def _import_ml():
     try:
         from unsloth import FastLanguageModel
         import torch
-        from trl import GRPOConfig, GRPOTrainer
         from transformers import AutoTokenizer
-        return FastLanguageModel, torch, GRPOConfig, GRPOTrainer, AutoTokenizer
+        return FastLanguageModel, torch, AutoTokenizer
     except ImportError as e:
         raise ImportError(
             f"Missing ML dependency: {e}\n"
-            "Install with: pip install unsloth trl transformers torch"
+            "Install with: pip install unsloth transformers torch"
         ) from e
 
 # ---------------------------------------------------------------------------
@@ -519,7 +518,7 @@ def train(
     model = tokenizer = optimizer = None
 
     if use_model:
-        FastLanguageModel, torch, GRPOConfig, GRPOTrainer, AutoTokenizer = _import_ml()
+        FastLanguageModel, torch, AutoTokenizer = _import_ml()
 
         print("[1] Loading Qwen2.5-1.5B with Unsloth 4-bit quantization...")
         model, tokenizer = FastLanguageModel.from_pretrained(
