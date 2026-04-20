@@ -71,6 +71,9 @@ from reward import r_investigator
 # Config
 # ---------------------------------------------------------------------------
 
+# Unsloth 2024.11+ suppresses logits by default; our grpo_loss() needs them.
+os.environ.setdefault("UNSLOTH_RETURN_LOGITS", "1")
+
 MODEL_NAME      = os.environ.get("HEIST_MODEL",      "unsloth/Qwen2.5-1.5B-Instruct-bnb-4bit")
 MAX_SEQ_LEN     = int(os.environ.get("MAX_SEQ_LEN",  "2048"))
 NUM_EPISODES    = int(os.environ.get("NUM_EPISODES",  "20"))    # 20 for T4 smoke run
