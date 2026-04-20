@@ -724,14 +724,15 @@ with tab4:
     import plotly.graph_objects as go
 
     st.markdown("### 📊 Model Comparison")
-    st.caption("Random (0.14 F1) proves zero hardcoded knowledge. Rules (0.30) are easily beaten. Trained (0.90) dominates. Zero-Day (0.54) shows the innovation gap.")
+    _zd_f1_actual = zd_data.get("mean_f1", 0.29)
+    st.caption(f"Random (0.14 F1) proves zero hardcoded knowledge. Rules (0.30) are easily beaten. Trained (0.90) dominates. Zero-Day ({_zd_f1_actual:.2f}) shows the innovation gap.")
 
     bench = _load_benchmark()
     comp  = bench.get("comparison", {
         "random":   {"avg_f1": 0.14},
         "rules":    {"avg_f1": 0.30},
         "trained":  {"avg_f1": 0.90},
-        "zero_day": {"avg_f1": 0.54},
+        "zero_day": {"avg_f1": _zd_f1_actual},
     })
 
     models      = list(comp.keys())
