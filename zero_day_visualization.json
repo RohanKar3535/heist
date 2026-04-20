@@ -1,0 +1,48 @@
+{
+  "nodes": [
+    {
+      "id": "ind_9789",
+      "type": "entity"
+    },
+    {
+      "id": "acc_30701",
+      "type": "entity"
+    },
+    {
+      "id": "acc_56238",
+      "type": "entity"
+    },
+    {
+      "id": "acc_34870",
+      "type": "entity"
+    },
+    {
+      "id": "acc_52212",
+      "type": "entity"
+    }
+  ],
+  "edges": [
+    {
+      "source": "ind_9789",
+      "target": "acc_30701",
+      "type": "transaction"
+    },
+    {
+      "source": "acc_30701",
+      "target": "acc_56238",
+      "type": "transaction"
+    },
+    {
+      "source": "acc_56238",
+      "target": "acc_34870",
+      "type": "transaction"
+    },
+    {
+      "source": "acc_34870",
+      "target": "acc_52212",
+      "type": "transaction"
+    }
+  ],
+  "scheme_type": "unknown",
+  "novelty_score": 4.0
+}

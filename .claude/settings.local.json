@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python env/transaction_graph.py)",
+      "Bash(python -c ' *)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:meta-pytorch.org)",
+      "Bash(pip show *)",
+      "Bash(python -c \"import openenv; print\\(openenv.__file__\\)\")",
+      "Bash(python -m pip show openenv)",
+      "Bash(xargs ls *)",
+      "Bash(uv lock *)",
+      "Bash(openenv validate *)",
+      "Bash(python -c \"import io,sys; sys.stdout=io.TextIOWrapper\\(sys.stdout.buffer,encoding='utf-8',errors='replace'\\); exec\\(open\\('tools.py'\\).read\\(\\)\\)\")",
+      "Bash(python /mnt/c/Users/Rohan/heist/env/tools.py)",
+      "Bash(python \"C:/Users/Rohan/heist/env/tools.py\")",
+      "Bash(python \"C:/Users/Rohan/heist/env/tools.py\" --list)",
+      "Bash(dir /s /b \"C:\\\\Users\\\\Rohan\\\\heist\\\\*.py\")",
+      "Bash(findstr /v \".venv\")",
+      "Bash(findstr /v \"site-packages\")",
+      "Bash(cmd /c \"dir /s /b C:\\\\Users\\\\Rohan\\\\heist\\\\*.py 2>&1\")",
+      "Bash(cmd /c \"dir /s /b C:\\\\Users\\\\Rohan\\\\heist\\\\*.py\")"
+    ]
+  }
+}

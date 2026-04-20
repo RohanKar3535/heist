@@ -1,0 +1,40 @@
+{
+  "scheme_info": {
+    "weakness_vector": {
+      "smurfing": 0.1,
+      "layering": 0.1,
+      "shell_company": 0.1,
+      "crypto_mixing": 0.1,
+      "trade_based": 0.1,
+      "structuring_variant": 0.1,
+      "crypto_variant": 0.1,
+      "trade_variant": 0.1,
+      "layering_variant": 0.1
+    },
+    "attempts": 1,
+    "validated": true,
+    "penalty": 0.0,
+    "target_weakness": "trade_variant",
+    "novelty_bonus": 0.380174
+  },
+  "structural_novelty": true,
+  "min_ged": 16.0,
+  "ged_threshold": 4.0,
+  "n_trials": 5,
+  "trial_f1": [
+    0.25,
+    0.2857,
+    0.3333,
+    0.2857,
+    0.25
+  ],
+  "trial_r_inv": [
+    0.3044,
+    0.3205,
+    0.346,
+    0.3222,
+    0.3044
+  ],
+  "mean_f1": 0.281,
+  "mean_r_inv": 0.3195
+}

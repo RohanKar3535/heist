@@ -1,0 +1,48 @@
+[
+  {
+    "episode": 5,
+    "tau": 0.95,
+    "weakness_vector": {
+      "shell_chain": 0.95,
+      "smurfing": 0.5,
+      "layering": 0.5,
+      "crypto_mixing": 0.5,
+      "trade_based": 0.5
+    },
+    "sampling_dist": {
+      "shell_chain": 0.2865,
+      "smurfing": 0.1784,
+      "layering": 0.1784,
+      "crypto_mixing": 0.1784,
+      "trade_based": 0.1784
+    },
+    "elo": {
+      "criminal_elo": 1266.8,
+      "investigator_elo": 1133.2,
+      "delta": 133.7
+    }
+  },
+  {
+    "episode": 10,
+    "tau": 0.9025,
+    "weakness_vector": {
+      "shell_chain": 0.95,
+      "smurfing": 0.5,
+      "layering": 0.5,
+      "crypto_mixing": 0.5,
+      "trade_based": 0.5
+    },
+    "sampling_dist": {
+      "shell_chain": 0.2916,
+      "smurfing": 0.1771,
+      "layering": 0.1771,
+      "crypto_mixing": 0.1771,
+      "trade_based": 0.1771
+    },
+    "elo": {
+      "criminal_elo": 1310.5,
+      "investigator_elo": 1089.5,
+      "delta": 220.9
+    }
+  }
+]

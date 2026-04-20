@@ -1,0 +1,11 @@
+episode,scheme_type,f1,r_inv,steps,compliance
+1,trade_based,0.3333,0.2595,11,0.3333
+2,layering,0.2500,0.1829,11,0.2500
+3,trade_based,0.2857,0.2084,11,0.2857
+4,trade_based,0.2857,0.2293,11,0.2857
+5,crypto_mixing,0.2857,0.2421,11,0.2857
+6,layering,0.2857,0.2345,11,0.2857
+7,shell_company,0.2857,0.2137,11,0.2857
+8,shell_company,0.3333,0.2468,11,0.3333
+9,crypto_mixing,0.3333,0.2309,11,0.3333
+10,trade_based,0.3333,0.2496,11,0.3333

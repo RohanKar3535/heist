@@ -1,0 +1,22 @@
+[
+  {
+    "episode": 5,
+    "mean_f1": {
+      "shell_chain": 0.05,
+      "smurfing": null,
+      "layering": null,
+      "crypto_mixing": null,
+      "trade_based": null
+    }
+  },
+  {
+    "episode": 10,
+    "mean_f1": {
+      "shell_chain": 0.05,
+      "smurfing": null,
+      "layering": null,
+      "crypto_mixing": null,
+      "trade_based": null
+    }
+  }
+]
