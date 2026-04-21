@@ -30,7 +30,18 @@ import json
 import os
 import sys
 import time
+import warnings
 from typing import Any, Dict, List, Optional, Tuple
+
+# Suppress the "Both max_new_tokens and max_length set" flood from HuggingFace
+# generate() — happens because Unsloth sets generation_config.max_length=32768
+# but we always pass max_new_tokens=40. Clearing generation_config below also
+# helps, but this catches any residual firings from internal Unsloth calls.
+warnings.filterwarnings(
+    "ignore",
+    message=r".*Both `max_new_tokens`.*and `max_length`.*",
+    category=UserWarning,
+)
 
 import numpy as np
 
@@ -612,6 +623,10 @@ def train(
         )
 
         model.train()
+        # Clear max_length from generation config so max_new_tokens doesn't
+        # trigger the "Both max_new_tokens and max_length set" warning flood.
+        if hasattr(model, "generation_config"):
+            model.generation_config.max_length = None
 
         import torch
         optimizer = torch.optim.AdamW(
@@ -760,7 +775,7 @@ def train(
             recent_rinvs = curves["r_inv"][-5:]
             rolling_avg = float(np.mean(recent_rinvs)) if recent_rinvs else 0.0
             if rolling_avg > 0 and mean_r_inv < rolling_avg * 0.95:
-                criminal_designer.temperature = min(2.0, criminal_designer.temperature * 1.2)
+                criminal_designer.temperature = min(1.5, criminal_designer.temperature * 1.2)
                 if verbose:
                     print(f"  [Explore] Perf drop detected (R={mean_r_inv:.3f} < avg={rolling_avg:.3f}) — temperature={criminal_designer.temperature:.2f}")
             else:
