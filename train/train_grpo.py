@@ -42,6 +42,17 @@ warnings.filterwarnings(
     message=r".*Both `max_new_tokens`.*and `max_length`.*",
     category=UserWarning,
 )
+# Transformers 5.5+ renamed AttentionMaskConverter — Unsloth hasn't updated yet
+warnings.filterwarnings(
+    "ignore",
+    message=r".*AttentionMaskConverter.*deprecated.*",
+    category=FutureWarning,
+)
+warnings.filterwarnings(
+    "ignore",
+    message=r".*use_return_dict.*deprecated.*",
+    category=FutureWarning,
+)
 
 import numpy as np
 
@@ -234,6 +245,7 @@ def run_rollout(
     verbose: bool = False,
     expert=None,
     episode_num: int = 0,
+    temperature: float = 0.7,
 ) -> Dict[str, Any]:
     """
     Run one complete episode.
@@ -279,7 +291,7 @@ def run_rollout(
                     **inputs,
                     max_new_tokens=40,
                     do_sample=True,
-                    temperature=0.7,
+                    temperature=temperature,
                     pad_token_id=tokenizer.eos_token_id,
                 )
             generated = tokenizer.decode(
@@ -291,10 +303,17 @@ def run_rollout(
 
         action_type_str, params = parse_action(generated, beliefs)
 
-        # For SAR filing: override parsed entities with accumulated evidence chain
-        # (accumulated chain is always more accurate than what the model outputs as text)
+        # For SAR filing: submit only high-confidence entities (P > 0.5) to reduce
+        # false positives that tank precision. Previously we submitted ALL queried
+        # entities, which capped F1 at ~0.5 because precision was always diluted.
+        # Fall back to top-5 by belief if no entity clears the threshold.
         if action_type_str == "file_SAR" and evidence_chain:
-            params["evidence_chain"] = evidence_chain.copy()
+            high_conf = [e for e in evidence_chain if beliefs.get(e, 0.0) > 0.5]
+            if high_conf:
+                params["evidence_chain"] = high_conf
+            else:
+                top5 = sorted(evidence_chain, key=lambda e: beliefs.get(e, 0.0), reverse=True)[:5]
+                params["evidence_chain"] = top5
 
         # Accumulate evidence
         entity = params.get("entity_id", "")
@@ -690,6 +709,11 @@ def train(
         # Collect G rollouts (GRPO requires multiple samples per prompt)
         rollouts = []
         for g in range(GRPO_G):
+            # Spread temperature across rollouts: 0.5 (conservative) → 1.1 (exploratory).
+            # GRPO advantage = (r_i - mean) / std — if all rollouts score identically
+            # the std collapses to ~0 and gradients vanish. Temperature diversity
+            # creates genuine reward spread within the group → real gradient signal.
+            rollout_temp = 0.5 + (g / max(GRPO_G - 1, 1)) * 0.6
             rollout = run_rollout(
                 env=env,
                 model=model,
@@ -699,6 +723,7 @@ def train(
                 verbose=False,
                 expert=expert,
                 episode_num=ep,
+                temperature=rollout_temp,
             )
             rollouts.append(rollout)
 
@@ -769,17 +794,18 @@ def train(
         curves["scheme_types"].append(best_rollout["scheme_type"])
 
         # ── Dynamic exploration: bump temperature when performance drops ──
-        # If the rolling-5 average R_inv drops >5% vs current episode,
-        # the criminal was getting lazy — push it to explore harder.
+        # Only escalate when >10% below rolling average (was 5% — too sensitive,
+        # fired 22% of episodes and kept temperature pinned at 1.5 cap).
+        # Cool faster: 0.93/ep instead of 0.97/ep (recovers in ~8 eps not 17).
         if criminal_designer is not None and ep > 5:
             recent_rinvs = curves["r_inv"][-5:]
             rolling_avg = float(np.mean(recent_rinvs)) if recent_rinvs else 0.0
-            if rolling_avg > 0 and mean_r_inv < rolling_avg * 0.95:
+            if rolling_avg > 0 and mean_r_inv < rolling_avg * 0.90:
                 criminal_designer.temperature = min(1.5, criminal_designer.temperature * 1.2)
                 if verbose:
                     print(f"  [Explore] Perf drop detected (R={mean_r_inv:.3f} < avg={rolling_avg:.3f}) — temperature={criminal_designer.temperature:.2f}")
             else:
-                criminal_designer.temperature = max(1.0, criminal_designer.temperature * 0.97)
+                criminal_designer.temperature = max(1.0, criminal_designer.temperature * 0.93)
 
         # ── Criminal Codex update ──────────────────────────────────────
         #    Every K=5 episodes, call criminal.adapt() to evolve the criminal
