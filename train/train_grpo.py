@@ -245,6 +245,7 @@ def run_rollout(
     verbose: bool = False,
     expert=None,
     episode_num: int = 0,
+    temperature: float = 0.7,
 ) -> Dict[str, Any]:
     """
     Run one complete episode.
@@ -290,7 +291,7 @@ def run_rollout(
                     **inputs,
                     max_new_tokens=40,
                     do_sample=True,
-                    temperature=0.7,
+                    temperature=temperature,
                     pad_token_id=tokenizer.eos_token_id,
                 )
             generated = tokenizer.decode(
@@ -302,10 +303,17 @@ def run_rollout(
 
         action_type_str, params = parse_action(generated, beliefs)
 
-        # For SAR filing: override parsed entities with accumulated evidence chain
-        # (accumulated chain is always more accurate than what the model outputs as text)
+        # For SAR filing: submit only high-confidence entities (P > 0.5) to reduce
+        # false positives that tank precision. Previously we submitted ALL queried
+        # entities, which capped F1 at ~0.5 because precision was always diluted.
+        # Fall back to top-5 by belief if no entity clears the threshold.
         if action_type_str == "file_SAR" and evidence_chain:
-            params["evidence_chain"] = evidence_chain.copy()
+            high_conf = [e for e in evidence_chain if beliefs.get(e, 0.0) > 0.5]
+            if high_conf:
+                params["evidence_chain"] = high_conf
+            else:
+                top5 = sorted(evidence_chain, key=lambda e: beliefs.get(e, 0.0), reverse=True)[:5]
+                params["evidence_chain"] = top5
 
         # Accumulate evidence
         entity = params.get("entity_id", "")
@@ -701,6 +709,11 @@ def train(
         # Collect G rollouts (GRPO requires multiple samples per prompt)
         rollouts = []
         for g in range(GRPO_G):
+            # Spread temperature across rollouts: 0.5 (conservative) → 1.1 (exploratory).
+            # GRPO advantage = (r_i - mean) / std — if all rollouts score identically
+            # the std collapses to ~0 and gradients vanish. Temperature diversity
+            # creates genuine reward spread within the group → real gradient signal.
+            rollout_temp = 0.5 + (g / max(GRPO_G - 1, 1)) * 0.6
             rollout = run_rollout(
                 env=env,
                 model=model,
@@ -710,6 +723,7 @@ def train(
                 verbose=False,
                 expert=expert,
                 episode_num=ep,
+                temperature=rollout_temp,
             )
             rollouts.append(rollout)
 
