@@ -23,6 +23,7 @@ import os
 import re
 import sys
 import textwrap
+import time
 import traceback
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -412,30 +413,40 @@ Respond with ONLY the Python function code. No explanation. No markdown fencing.
 
 
 def _call_gemini(prompt: str) -> Optional[str]:
-    """Call Gemini API and return response text."""
+    """Call Gemini API and return response text. Retries up to 3x on 429."""
     if not GEMINI_API_KEY:
         return None
 
-    try:
-        import requests
-        resp = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
-            json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "temperature": 0.8,
-                    "maxOutputTokens": 2048,
+    import requests
+
+    for attempt in range(3):
+        try:
+            resp = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
+                json={
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {
+                        "temperature": 0.8,
+                        "maxOutputTokens": 2048,
+                    },
                 },
-            },
-            timeout=30,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        return data["candidates"][0]["content"]["parts"][0]["text"]
-    except Exception as e:
-        print(f"[CriminalDesigner] Gemini API error: {e}")
-        return None
+                timeout=30,
+            )
+            if resp.status_code == 429:
+                wait = 30 * (2 ** attempt)  # 30s → 60s → 120s
+                print(f"[CriminalDesigner] Gemini 429 rate limit — retry {attempt + 1}/3 in {wait}s")
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        except Exception as e:
+            print(f"[CriminalDesigner] Gemini API error: {e}")
+            return None
+
+    print("[CriminalDesigner] Gemini 429: all retries exhausted, using fallback")
+    return None
 
 
 def generate_scheme(

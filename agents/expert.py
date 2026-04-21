@@ -17,7 +17,8 @@ import json
 import os
 import re
 import sys
-from typing import Any, Dict, List, Tuple
+import time
+from typing import Any, Dict, List, Optional, Tuple
 
 # Add project root for imports if needed
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -91,30 +92,40 @@ Do NOT include markdown formatting like ```json or anything else. Just the raw J
 """
 
 def _call_gemini(prompt: str) -> Optional[str]:
-    """Call Gemini API and return response text."""
+    """Call Gemini API and return response text. Retries up to 3x on 429."""
     if not GEMINI_API_KEY:
         return None
 
-    try:
-        import requests
-        resp = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
-            json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "temperature": 0.2, # Low temperature for consistent grading
-                    "maxOutputTokens": 1024,
+    import requests
+
+    for attempt in range(3):
+        try:
+            resp = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
+                json={
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {
+                        "temperature": 0.2,
+                        "maxOutputTokens": 1024,
+                    },
                 },
-            },
-            timeout=30,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        return data["candidates"][0]["content"]["parts"][0]["text"]
-    except Exception as e:
-        print(f"[ComplianceExpert] Gemini API error: {e}")
-        return None
+                timeout=30,
+            )
+            if resp.status_code == 429:
+                wait = 30 * (2 ** attempt)
+                print(f"[ComplianceExpert] Gemini 429 rate limit — retry {attempt + 1}/3 in {wait}s")
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        except Exception as e:
+            print(f"[ComplianceExpert] Gemini API error: {e}")
+            return None
+
+    print("[ComplianceExpert] Gemini 429: all retries exhausted, using fallback")
+    return None
 
 
 def _deterministic_fallback(
@@ -224,16 +235,21 @@ class ComplianceExpert:
         
         # Clamp score
         score = max(0.0, min(1.0, score))
-        
+
         # Track ignored feedback (if expert flagged X previously, and flags X again)
         # Identify negative flags (heuristics: contains "too_", "missing", "insufficient")
         negative_flags = {f for f in flags if any(w in f.lower() for w in ["too", "missing", "insufficient", "slow", "noisy", "bad", "verbose"])}
-        
+
         for flag in negative_flags:
             if flag in self.previous_feedback_flags:
                 self.ignored_feedback_counts[flag] = self.ignored_feedback_counts.get(flag, 0) + 1
-                
+
         self.previous_feedback_flags = negative_flags
+
+        # Apply penalty for repeatedly ignoring feedback (caps at -0.3)
+        total_ignored = sum(self.ignored_feedback_counts.values())
+        if total_ignored > 0:
+            score = max(0.0, score - min(0.3, total_ignored * 0.05))
         
         feedback = {
             "phase": profile["phase"],

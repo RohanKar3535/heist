@@ -76,9 +76,9 @@ os.environ.setdefault("UNSLOTH_RETURN_LOGITS", "1")
 
 MODEL_NAME      = os.environ.get("HEIST_MODEL",      "unsloth/Qwen2.5-1.5B-Instruct-bnb-4bit")
 MAX_SEQ_LEN     = int(os.environ.get("MAX_SEQ_LEN",  "2048"))
-NUM_EPISODES    = int(os.environ.get("NUM_EPISODES",  "20"))    # 20 for T4 smoke run
-GRPO_G          = int(os.environ.get("GRPO_G",       "4"))      # rollouts per prompt
-LR              = float(os.environ.get("LR",          "5e-5"))
+NUM_EPISODES    = int(os.environ.get("NUM_EPISODES",  "50"))    # 50 minimum for co-evolution story
+GRPO_G          = int(os.environ.get("GRPO_G",       "8"))      # 8 rollouts: better variance reduction
+LR              = float(os.environ.get("LR",          "2e-5"))  # 5e-5 caused ep1→ep4 regression
 CODEX_UPDATE_K  = int(os.environ.get("CODEX_K",      "5"))      # criminal.adapt() every K eps
 CKPT_EVERY      = int(os.environ.get("CKPT_EVERY",   "10"))     # checkpoint interval
 OUT_DIR         = os.environ.get("OUT_DIR",           os.path.join(_ROOT, "checkpoints"))
@@ -221,6 +221,8 @@ def run_rollout(
     seed: int,
     use_model: bool = True,
     verbose: bool = False,
+    expert=None,
+    episode_num: int = 0,
 ) -> Dict[str, Any]:
     """
     Run one complete episode.
@@ -310,7 +312,21 @@ def run_rollout(
         tool_result = obs_dict.get("tool_result") or {}
         data = tool_result.get("data", {})
         if "compliance_score" in data:
-            final_compliance = float(data["compliance_score"])
+            tool_compliance = float(data["compliance_score"])
+            if expert is not None and evidence_chain:
+                ev_dicts = [{"entity_id": e} for e in evidence_chain]
+                risk_score = max(final_beliefs.values()) * 10.0 if final_beliefs else 5.0
+                exp_score, _ = expert.evaluate_SAR(
+                    evidence_chain=ev_dicts,
+                    risk_score=risk_score,
+                    narrative=completions[-1] if completions else "",
+                    episode_number=episode_num,
+                    query_count=steps,
+                )
+                # 60% F1-based tool compliance, 40% expert satisfaction (preference drift)
+                final_compliance = 0.6 * tool_compliance + 0.4 * exp_score
+            else:
+                final_compliance = tool_compliance
 
         if verbose:
             print(f"  step={steps:2d} | {action_type_str:30s} | R={step_r:+.2f} | budget={obs_dict.get('budget_remaining')}")
@@ -619,6 +635,16 @@ def train(
     except Exception as e:
         print(f"  CriminalDesigner not available: {e}")
 
+    # Compliance Expert (preference drift — wired into run_rollout compliance score)
+    expert = None
+    try:
+        sys.path.insert(0, os.path.join(_ROOT, "agents"))
+        from agents.expert import ComplianceExpert
+        expert = ComplianceExpert()
+        print("  ComplianceExpert loaded.")
+    except Exception as e:
+        print(f"  ComplianceExpert not available: {e}")
+
     # ── Init logging ───────────────────────────────────────────────────
     os.makedirs(OUT_DIR, exist_ok=True)
     _init_csv(LOG_CSV)
@@ -656,6 +682,8 @@ def train(
                 seed=seed + g,
                 use_model=use_model,
                 verbose=False,
+                expert=expert,
+                episode_num=ep,
             )
             rollouts.append(rollout)
 
@@ -724,6 +752,19 @@ def train(
         curves["r_inv"].append(round(mean_r_inv, 4))
         curves["f1"].append(round(best_rollout["f1"], 4))
         curves["scheme_types"].append(best_rollout["scheme_type"])
+
+        # ── Dynamic exploration: bump temperature when performance drops ──
+        # If the rolling-5 average R_inv drops >5% vs current episode,
+        # the criminal was getting lazy — push it to explore harder.
+        if criminal_designer is not None and ep > 5:
+            recent_rinvs = curves["r_inv"][-5:]
+            rolling_avg = float(np.mean(recent_rinvs)) if recent_rinvs else 0.0
+            if rolling_avg > 0 and mean_r_inv < rolling_avg * 0.95:
+                criminal_designer.temperature = min(2.0, criminal_designer.temperature * 1.2)
+                if verbose:
+                    print(f"  [Explore] Perf drop detected (R={mean_r_inv:.3f} < avg={rolling_avg:.3f}) — temperature={criminal_designer.temperature:.2f}")
+            else:
+                criminal_designer.temperature = max(1.0, criminal_designer.temperature * 0.97)
 
         # ── Criminal Codex update ──────────────────────────────────────
         #    Every K=5 episodes, call criminal.adapt() to evolve the criminal
