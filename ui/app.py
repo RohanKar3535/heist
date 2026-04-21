@@ -149,14 +149,23 @@ def _load_zero_day_viz() -> Dict:
 
 
 def _load_benchmark() -> Dict:
-    return _load_json(_ROOT / "benchmark_results.json", {
+    saved = _load_json(_ROOT / "benchmark_results.json", None)
+    if saved:
+        return saved
+    # Fallback: pull trained F1 from actual training curves, not hardcoded value.
+    _curves = _load_curves()
+    _f1s = _curves.get("f1", [])
+    _peak_f1 = max(_f1s) if _f1s else 0.50
+    _rinvs = _curves.get("r_inv", [])
+    _peak_rinv = max(_rinvs) if _rinvs else 0.28
+    return {
         "comparison": {
             "random":   {"avg_f1": 0.14, "avg_r_inv": 0.12},
             "rules":    {"avg_f1": 0.30, "avg_r_inv": 0.25},
-            "trained":  {"avg_f1": 0.90, "avg_r_inv": 0.82},
-            "zero_day": {"avg_f1": 0.54, "avg_r_inv": 0.46},
+            "trained":  {"avg_f1": round(_peak_f1, 3), "avg_r_inv": round(_peak_rinv, 3)},
+            "zero_day": {"avg_f1": 0.29, "avg_r_inv": 0.22},
         }
-    })
+    }
 
 
 def _load_codex() -> str:
@@ -371,9 +380,14 @@ zd_data     = _load_zero_day()
 bench_data  = _load_benchmark()
 comp        = bench_data.get("comparison", {})
 
+_trained_f1_vals = curves_data.get("f1", [])
+_trained_peak_f1 = max(_trained_f1_vals) if _trained_f1_vals else 0.0
+_trained_r_inv_vals = curves_data.get("r_inv", [])
+_trained_peak_rinv = max(_trained_r_inv_vals) if _trained_r_inv_vals else 0.0
+
 m1, m2, m3, m4, m5 = st.columns(5)
 with m1:
-    st.markdown(f'<div class="metric-card"><div class="metric-val">0.90</div><div class="metric-label">Trained F1</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-card"><div class="metric-val">{_trained_peak_f1:.2f}</div><div class="metric-label">Peak GRPO F1</div></div>', unsafe_allow_html=True)
 with m2:
     st.markdown(f'<div class="metric-card"><div class="metric-val">0.14</div><div class="metric-label">Untrained F1</div></div>', unsafe_allow_html=True)
 with m3:
@@ -725,13 +739,14 @@ with tab4:
 
     st.markdown("### 📊 Model Comparison")
     _zd_f1_actual = zd_data.get("mean_f1", 0.29)
-    st.caption(f"Random (0.14 F1) proves zero hardcoded knowledge. Rules (0.30) are easily beaten. Trained (0.90) dominates. Zero-Day ({_zd_f1_actual:.2f}) shows the innovation gap.")
+    _bench_trained_f1 = _load_benchmark().get("comparison", {}).get("trained", {}).get("avg_f1", _trained_peak_f1)
+    st.caption(f"Random (0.14 F1) proves zero hardcoded knowledge. Rules (0.30) are easily beaten. Trained ({_bench_trained_f1:.2f}) is our best GRPO checkpoint. Zero-Day ({_zd_f1_actual:.2f}) shows the adaptation gap.")
 
     bench = _load_benchmark()
     comp  = bench.get("comparison", {
         "random":   {"avg_f1": 0.14},
         "rules":    {"avg_f1": 0.30},
-        "trained":  {"avg_f1": 0.90},
+        "trained":  {"avg_f1": _trained_peak_f1},
         "zero_day": {"avg_f1": _zd_f1_actual},
     })
 
@@ -756,8 +771,8 @@ with tab4:
             text=[f"{f1:.2f}"],
             textposition="outside",
         ))
-    fig_bar.add_hline(y=0.9, line_dash="dash", line_color="#68d391",
-                      annotation_text="Target (0.90)")
+    fig_bar.add_hline(y=_bench_trained_f1, line_dash="dash", line_color="#68d391",
+                      annotation_text=f"GRPO Peak ({_bench_trained_f1:.2f})")
     fig_bar.update_layout(
         paper_bgcolor="#0d1224", plot_bgcolor="#0d1224",
         font=dict(color="#e2e8f0"), height=350,
@@ -853,7 +868,7 @@ with tab5:
         trials   = zd.get("trial_f1", [0.5]*10)
 
         st.metric("Mean F1 vs Zero-Day", f"{mean_f1:.3f}",
-                  delta=f"{(mean_f1 - 0.90):.3f} vs trained F1",
+                  delta=f"{(mean_f1 - _trained_peak_f1):.3f} vs GRPO peak",
                   delta_color="inverse")
         st.progress(mean_f1, text=f"Catches {mean_f1*100:.0f}% of the zero-day scheme")
 
@@ -868,8 +883,8 @@ with tab5:
         text=[f"{f:.2f}" for f in trials],
         textposition="outside",
     ))
-    fig_zd.add_hline(y=0.90, line_dash="dash", line_color="#68d391",
-                     annotation_text="Trained avg (0.90)")
+    fig_zd.add_hline(y=_trained_peak_f1, line_dash="dash", line_color="#68d391",
+                     annotation_text=f"GRPO peak ({_trained_peak_f1:.2f})")
     fig_zd.add_hline(y=mean_f1, line_dash="dot", line_color="#f6e05e",
                      annotation_text=f"Zero-Day avg ({mean_f1:.2f})")
     fig_zd.update_layout(
@@ -891,7 +906,7 @@ with tab5:
     then writes its own Python attack code — growing the Criminal Codex to 30+ schemes across 50 episodes.
     When the investigator gets too close, it morphs mid-episode, rerouting funds and invalidating evidence chains
     in a real Stackelberg game.<br><br>
-    The trained investigator achieves <b>0.90 F1</b> on known schemes — crushing the rule-based baseline (0.30)
+    The trained investigator achieves <b>{trained_f1:.2f} peak F1</b> on known schemes — crushing the rule-based baseline (0.30)
     and proving it learned genuine investigative strategy with zero hardcoded financial knowledge.<br><br>
     Then the criminal generates its <b>Zero-Day</b>: a novel laundering pattern that no human designed.
     Graph Edit Distance confirms the scheme is structurally novel (GED={ged:.0f}).
@@ -899,7 +914,7 @@ with tab5:
     <i>This is not a demo. This is a co-evolving adversarial system that discovered a new crime pattern.</i>
   </div>
 </div>
-""".format(ged=min_ged, f1=mean_f1*100), unsafe_allow_html=True)
+""".format(ged=min_ged, f1=mean_f1*100, trained_f1=_trained_peak_f1), unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
 # Footer
