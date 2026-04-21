@@ -25,6 +25,7 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+GROQ_API_KEY   = os.environ.get("GROQ_API_KEY", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL   = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
 
@@ -92,12 +93,27 @@ Do NOT include markdown formatting like ```json or anything else. Just the raw J
 """
 
 def _call_gemini(prompt: str) -> Optional[str]:
-    """Call Gemini API and return response text. Retries up to 3x on 429."""
+    """Call LLM API — Groq primary, Gemini fallback."""
+    # ── Groq (primary) ────────────────────────────────────────────────
+    if GROQ_API_KEY:
+        try:
+            from groq import Groq
+            client = Groq(api_key=GROQ_API_KEY)
+            response = client.chat.completions.create(
+                model="llama-3.1-8b-instant",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1024,
+                temperature=0.2,
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f"[ComplianceExpert] Groq error: {e}")
+
+    # ── Gemini (fallback) ──────────────────────────────────────────────
     if not GEMINI_API_KEY:
         return None
 
     import requests
-
     for attempt in range(3):
         try:
             resp = requests.post(
@@ -105,26 +121,22 @@ def _call_gemini(prompt: str) -> Optional[str]:
                 f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
                 json={
                     "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {
-                        "temperature": 0.2,
-                        "maxOutputTokens": 1024,
-                    },
+                    "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1024},
                 },
                 timeout=30,
             )
             if resp.status_code == 429:
                 wait = 30 * (2 ** attempt)
-                print(f"[ComplianceExpert] Gemini 429 rate limit — retry {attempt + 1}/3 in {wait}s")
+                print(f"[ComplianceExpert] Gemini 429 — retry {attempt + 1}/3 in {wait}s")
                 time.sleep(wait)
                 continue
             resp.raise_for_status()
-            data = resp.json()
-            return data["candidates"][0]["content"]["parts"][0]["text"]
+            return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
         except Exception as e:
-            print(f"[ComplianceExpert] Gemini API error: {e}")
+            print(f"[ComplianceExpert] Gemini error: {e}")
             return None
 
-    print("[ComplianceExpert] Gemini 429: all retries exhausted, using fallback")
+    print("[ComplianceExpert] All retries exhausted, using fallback")
     return None
 
 
