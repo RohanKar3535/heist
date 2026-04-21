@@ -709,11 +709,13 @@ def train(
         # Collect G rollouts (GRPO requires multiple samples per prompt)
         rollouts = []
         for g in range(GRPO_G):
-            # Spread temperature across rollouts: 0.5 (conservative) → 1.1 (exploratory).
-            # GRPO advantage = (r_i - mean) / std — if all rollouts score identically
-            # the std collapses to ~0 and gradients vanish. Temperature diversity
-            # creates genuine reward spread within the group → real gradient signal.
-            rollout_temp = 0.5 + (g / max(GRPO_G - 1, 1)) * 0.6
+            # Spread temperature across rollouts: 0.5 (conservative) → 0.9 (exploratory).
+            # Capped at 0.9 (was 1.1) — values above ~1.0 produce near-zero-probability
+            # completions that cause log(~0) → NaN loss, killing the gradient update.
+            rollout_temp = 0.5 + (g / max(GRPO_G - 1, 1)) * 0.4
+            # Don't pass expert to rollouts — ComplianceExpert burns ~1400 Groq tokens
+            # per call × 6 rollouts × 50 episodes = 420k tokens, exhausting the 500k/day
+            # limit by ep35. Expert compliance is kept for the best-rollout log only.
             rollout = run_rollout(
                 env=env,
                 model=model,
@@ -721,7 +723,7 @@ def train(
                 seed=seed + g,
                 use_model=use_model,
                 verbose=False,
-                expert=expert,
+                expert=None,
                 episode_num=ep,
                 temperature=rollout_temp,
             )
@@ -762,13 +764,20 @@ def train(
                 all_completions,
                 all_advantages,
             )
-            total_loss.backward()
-            # Gradient clipping (stability on sparse rewards)
-            torch.nn.utils.clip_grad_norm_(
-                [p for p in model.parameters() if p.requires_grad], max_norm=1.0
-            )
-            optimizer.step()
-            loss_val = float(total_loss.item())
+            # Skip update if loss is NaN/Inf — high-temperature rollouts can produce
+            # near-zero-probability completions causing log(~0) → -inf → NaN.
+            # Propagating NaN gradients corrupts model weights silently.
+            if torch.isnan(total_loss) or torch.isinf(total_loss):
+                if verbose:
+                    print(f"  [WARN] NaN/Inf loss — skipping gradient update this episode")
+                loss_val = float("nan")
+            else:
+                total_loss.backward()
+                torch.nn.utils.clip_grad_norm_(
+                    [p for p in model.parameters() if p.requires_grad], max_norm=0.5
+                )
+                optimizer.step()
+                loss_val = float(total_loss.item())
         else:
             loss_val = 0.0
 
