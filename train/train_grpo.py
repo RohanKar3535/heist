@@ -42,6 +42,17 @@ warnings.filterwarnings(
     message=r".*Both `max_new_tokens`.*and `max_length`.*",
     category=UserWarning,
 )
+# Transformers 5.5+ renamed AttentionMaskConverter — Unsloth hasn't updated yet
+warnings.filterwarnings(
+    "ignore",
+    message=r".*AttentionMaskConverter.*deprecated.*",
+    category=FutureWarning,
+)
+warnings.filterwarnings(
+    "ignore",
+    message=r".*use_return_dict.*deprecated.*",
+    category=FutureWarning,
+)
 
 import numpy as np
 
@@ -769,17 +780,18 @@ def train(
         curves["scheme_types"].append(best_rollout["scheme_type"])
 
         # ── Dynamic exploration: bump temperature when performance drops ──
-        # If the rolling-5 average R_inv drops >5% vs current episode,
-        # the criminal was getting lazy — push it to explore harder.
+        # Only escalate when >10% below rolling average (was 5% — too sensitive,
+        # fired 22% of episodes and kept temperature pinned at 1.5 cap).
+        # Cool faster: 0.93/ep instead of 0.97/ep (recovers in ~8 eps not 17).
         if criminal_designer is not None and ep > 5:
             recent_rinvs = curves["r_inv"][-5:]
             rolling_avg = float(np.mean(recent_rinvs)) if recent_rinvs else 0.0
-            if rolling_avg > 0 and mean_r_inv < rolling_avg * 0.95:
+            if rolling_avg > 0 and mean_r_inv < rolling_avg * 0.90:
                 criminal_designer.temperature = min(1.5, criminal_designer.temperature * 1.2)
                 if verbose:
                     print(f"  [Explore] Perf drop detected (R={mean_r_inv:.3f} < avg={rolling_avg:.3f}) — temperature={criminal_designer.temperature:.2f}")
             else:
-                criminal_designer.temperature = max(1.0, criminal_designer.temperature * 0.97)
+                criminal_designer.temperature = max(1.0, criminal_designer.temperature * 0.93)
 
         # ── Criminal Codex update ──────────────────────────────────────
         #    Every K=5 episodes, call criminal.adapt() to evolve the criminal
