@@ -497,6 +497,7 @@ def grpo_loss(
     advantages = (rewards_t - mean_r) / std_r
 
     total_loss = torch.tensor(0.0, device=device, requires_grad=True)
+    valid_count = 0
 
     for i, (prompt, completion, adv) in enumerate(zip(prompts, completions, advantages)):
         full_text = prompt + completion
@@ -514,6 +515,10 @@ def grpo_loss(
         shift_logits  = outputs.logits[:, prompt_len-1:-1, :]
         shift_labels  = inputs["input_ids"][:, prompt_len:]
 
+        # Skip if completion was truncated away entirely
+        if shift_labels.shape[1] == 0:
+            continue
+
         log_probs = torch.nn.functional.log_softmax(shift_logits, dim=-1)
         token_log_probs = log_probs.gather(
             2, shift_labels.unsqueeze(-1)
@@ -522,11 +527,20 @@ def grpo_loss(
         # Mean log prob of completion
         mean_log_prob = token_log_probs.mean()
 
+        # Skip NaN/Inf from extreme logits — don't let one bad step corrupt the batch
+        if torch.isnan(mean_log_prob) or torch.isinf(mean_log_prob):
+            continue
+
         # GRPO: maximize advantage-weighted log probability
         step_loss = -adv * mean_log_prob
-        total_loss = total_loss + step_loss / len(prompts)
+        total_loss = total_loss + step_loss
+        valid_count += 1
 
-    return total_loss
+    # All steps were invalid — signal caller to skip update
+    if valid_count == 0:
+        return torch.tensor(float("nan"), device=device)
+
+    return total_loss / valid_count
 
 
 # ---------------------------------------------------------------------------

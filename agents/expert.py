@@ -93,7 +93,7 @@ Do NOT include markdown formatting like ```json or anything else. Just the raw J
 """
 
 def _call_gemini(prompt: str) -> Optional[str]:
-    """Call LLM API — Groq primary, Gemini fallback."""
+    """Call LLM API — Groq primary, Gemini fallback. Returns None immediately on rate limits."""
     # ── Groq (primary) ────────────────────────────────────────────────
     if GROQ_API_KEY:
         try:
@@ -107,6 +107,11 @@ def _call_gemini(prompt: str) -> Optional[str]:
             )
             return response.choices[0].message.content
         except Exception as e:
+            err_str = str(e)
+            # On rate limit (429), skip Gemini too — it won't help if TPD is exhausted.
+            # Use _deterministic_fallback instead of burning tokens on retries.
+            if "429" in err_str or "rate_limit" in err_str:
+                return None
             print(f"[ComplianceExpert] Groq error: {e}")
 
     # ── Gemini (fallback) ──────────────────────────────────────────────
@@ -114,30 +119,23 @@ def _call_gemini(prompt: str) -> Optional[str]:
         return None
 
     import requests
-    for attempt in range(3):
-        try:
-            resp = requests.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/"
-                f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
-                json={
-                    "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1024},
-                },
-                timeout=30,
-            )
-            if resp.status_code == 429:
-                wait = 30 * (2 ** attempt)
-                print(f"[ComplianceExpert] Gemini 429 — retry {attempt + 1}/3 in {wait}s")
-                time.sleep(wait)
-                continue
-            resp.raise_for_status()
-            return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
-        except Exception as e:
-            print(f"[ComplianceExpert] Gemini error: {e}")
-            return None
-
-    print("[ComplianceExpert] All retries exhausted, using fallback")
-    return None
+    try:
+        resp = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
+            json={
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1024},
+            },
+            timeout=30,
+        )
+        if resp.status_code == 429:
+            return None  # rate limited — use deterministic fallback, don't retry
+        resp.raise_for_status()
+        return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+    except Exception as e:
+        print(f"[ComplianceExpert] Gemini error: {e}")
+        return None
 
 
 def _deterministic_fallback(
