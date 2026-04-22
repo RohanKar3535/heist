@@ -198,22 +198,27 @@ def compute_novelty_bonus(
     existing_codes: List[str],
 ) -> float:
     """
-    Novelty bonus = mean cosine distance from all previous scheme embeddings.
+    Novelty bonus = minimum cosine distance to any existing scheme (nearest-neighbor).
     Returns value in [0, 1]. Higher = more novel.
+
+    Using min instead of mean prevents the score from shrinking as the codex grows:
+    mean distance decreases geometrically as more schemes fill the embedding space,
+    but min distance stays meaningful — it measures distance from the closest existing
+    scheme regardless of codex size.
     """
     if not existing_codes:
         return 1.0  # first scheme is maximally novel
-    
+
     new_emb = _scheme_embedding(new_code)
-    
+
     distances: List[float] = []
     for code in existing_codes:
         old_emb = _scheme_embedding(code)
         cos_sim = float(np.dot(new_emb, old_emb))
         cos_dist = 1.0 - max(-1.0, min(1.0, cos_sim))
         distances.append(cos_dist)
-    
-    return round(float(np.mean(distances)), 6)
+
+    return round(float(np.min(distances)), 6)
 
 
 # ---------------------------------------------------------------------------
