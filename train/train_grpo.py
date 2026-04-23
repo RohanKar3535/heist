@@ -753,12 +753,17 @@ def train(
             # Each rollout is treated as one group member — advantage computed
             # from final episode reward so intermediate steps aren't penalized.
             import torch
-            # Use last-step reward (file_SAR compliance × 10 + r_inv) instead of
-            # r_inv alone. r_inv range is ~0.14–0.22 (std ≈ 0.02 — too noisy for
-            # GRPO to learn from). Last-step reward range is ~1.0–5.0 (std ≈ 1.0),
-            # giving GRPO a real signal to differentiate good from bad rollouts.
+            # Terminal reward signal for GRPO advantage computation.
+            # - SAR filed (compliance > 0): use rewards[-1] = env_step_r + r_inv,
+            #   which includes the compliance × 10 bonus. Range ~1.0–5.0, std ~1.0.
+            # - Timeout (no SAR filed, compliance == 0): rewards[-1] is just the
+            #   last wandering step's env reward + low r_inv — semantically ambiguous.
+            #   Replace with a fixed -0.5 penalty so GRPO learns timeout = bad,
+            #   not "a slightly different kind of good rollout".
             rollout_rewards = [
-                r["rewards"][-1] if r["rewards"] else r["r_inv"]
+                (r["rewards"][-1] if r["rewards"] else r["r_inv"])
+                if r["compliance"] > 0
+                else -0.5
                 for r in rollouts
             ]
             rewards_t = torch.tensor(rollout_rewards, dtype=torch.float32)
