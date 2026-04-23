@@ -160,37 +160,47 @@ def softmax_target_selection(
 
 def _scheme_embedding(scheme_code: str) -> np.ndarray:
     """
-    Simple structural embedding of scheme code for novelty measurement.
-    Uses character n-gram frequency vector (no external model needed).
-    
-    This is a lightweight proxy. In production, use sentence-transformers.
+    Structural fingerprint of scheme code for novelty measurement.
+
+    Counts financial-operation keywords instead of character n-grams.
+    N-grams cannot distinguish _build_crypto_variant(3) from (4) — they
+    produce nearly identical trigram distributions. Keyword counts capture
+    what actually makes schemes mechanically different: which transaction
+    types, node types, and structural patterns they use.
     """
-    # Character 3-gram frequency
-    ngrams: Dict[str, int] = {}
     code = scheme_code.lower()
-    for i in range(len(code) - 2):
-        ng = code[i:i+3]
-        ngrams[ng] = ngrams.get(ng, 0) + 1
-    
-    # Fixed vocabulary from common Python/graph tokens
-    vocab = [
-        "gra", "pha", "edd", "dge", "nod", "ode", "amo", "mou", "unt",
-        "jur", "uri", "isd", "dic", "ict", "tio", "ion", "tra", "ran",
-        "ans", "nsa", "sac", "act", "she", "hel", "ell", "cry", "ryp",
-        "ypt", "pto", "smu", "mur", "urf", "lay", "aye", "yer", "wir",
-        "ire", "cas", "ash", "dep", "epo", "pos", "sit", "swi", "wif",
-        "ift", "haw", "awa", "wal", "ala", "off", "ffs", "fsh", "sho",
-        "hor", "ore", "pat", "ath", "loo", "oop", "hop", "mul", "ule",
-        "spl", "pli", "lit", "fan", "mix", "ixe", "tur", "umb", "mbl",
-        "ble", "inv", "nvo", "voi", "oic", "ice", "pri", "ric", "rng",
-        "for", "ran", "dom", "int", "flo", "loa", "uni", "nif", "ifo",
-    ]
-    
-    vec = np.array([ngrams.get(v, 0) for v in vocab], dtype=np.float64)
-    norm = np.linalg.norm(vec)
+
+    features = np.array([
+        # Transaction types — core mechanic signals
+        code.count("cash_deposit"),
+        code.count("crypto_transfer"),
+        code.count("wire_transfer"),
+        code.count("trade_finance"),
+        code.count("swift"),
+        code.count("hawala"),
+        code.count("ach"),
+        code.count("check"),
+        # Node types used as intermediaries
+        code.count("shell_company"),
+        code.count("crypto_exchange"),
+        code.count("individual"),
+        code.count("account"),
+        # Structural patterns
+        code.count("add_edge"),        # total edges injected
+        code.count("for "),            # loop depth (smurfing = many loops)
+        code.count("phase"),           # multi-phase indicator
+        code.count("rng.choice"),      # branching / selection count
+        # Financial scale indicators
+        code.count("9999"),            # structuring amounts near $10k threshold
+        code.count("offshore"),        # offshore routing
+        code.count("jurisdiction"),    # cross-jurisdiction complexity
+        code.count("rng.uniform("),    # amount randomisation calls
+    ], dtype=np.float64)
+
+    norm = np.linalg.norm(features)
     if norm > 0:
-        vec /= norm
-    return vec
+        features /= norm
+    return features
 
 
 def compute_novelty_bonus(
