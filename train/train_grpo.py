@@ -582,15 +582,19 @@ def _maybe_update_criminal(criminal_designer, episode: int, episode_results: Lis
         return
     if episode % CODEX_UPDATE_K != 0:
         return
-    for res in episode_results[-CODEX_UPDATE_K:]:
-        criminal_designer.update_weakness({
-            "scheme_type": res.get("scheme_type", "smurfing"),
-            "investigator_f1": res.get("f1", 0.5),
-        })
-    # Generate new scheme (will validate before adding to Codex)
-    fn, info = criminal_designer.generate_and_validate()
-    status = "validated" if info["validated"] else "failed"
-    print(f"  [Codex] ep={episode} | target={info['target_weakness']} | {status} | novelty={info['novelty_bonus']:.3f}")
+    try:
+        for res in episode_results[-CODEX_UPDATE_K:]:
+            criminal_designer.update_weakness({
+                "scheme_type": res.get("scheme_type", "smurfing"),
+                "investigator_f1": res.get("f1", 0.5),
+            })
+        # Generate new scheme (will validate before adding to Codex)
+        fn, info = criminal_designer.generate_and_validate()
+        status = "validated" if info["validated"] else "failed"
+        print(f"  [Codex] ep={episode} | target={info['target_weakness']} | {status} | novelty={info['novelty_bonus']:.3f}")
+    except Exception as e:
+        # Never let codex update kill training — just log and continue
+        print(f"  [Codex] ep={episode} | ERROR (skipped): {type(e).__name__}: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -780,21 +784,30 @@ def train(
             # Capped at 0.9 (was 1.1) — values above ~1.0 produce near-zero-probability
             # completions that cause log(~0) → NaN loss, killing the gradient update.
             rollout_temp = 0.5 + (g / max(GRPO_G - 1, 1)) * 0.4
-            # Expert enabled — preference drift reward feeds into compliance score
-            # which feeds into rewards[-1] → GRPO advantage. HF API handles the cost.
-            rollout = run_rollout(
-                env=env,
-                model=model,
-                tokenizer=tokenizer,
-                seed=seed + g,
-                use_model=use_model,
-                verbose=False,
-                expert=expert,
-                episode_num=ep,
-                temperature=rollout_temp,
-                preferred_scheme_type=target_scheme,
-            )
-            rollouts.append(rollout)
+            try:
+                # Expert enabled — preference drift reward feeds into compliance score
+                # which feeds into rewards[-1] → GRPO advantage. HF API handles the cost.
+                rollout = run_rollout(
+                    env=env,
+                    model=model,
+                    tokenizer=tokenizer,
+                    seed=seed + g,
+                    use_model=use_model,
+                    verbose=False,
+                    expert=expert,
+                    episode_num=ep,
+                    temperature=rollout_temp,
+                    preferred_scheme_type=target_scheme,
+                )
+                rollouts.append(rollout)
+            except Exception as _rollout_err:
+                # One bad rollout (env crash, OOM, etc.) must NOT kill the episode.
+                print(f"  [WARN] rollout g={g} ep={ep} failed ({type(_rollout_err).__name__}): {_rollout_err} — skipped")
+
+        # If ALL rollouts failed, skip this episode entirely
+        if not rollouts:
+            print(f"  [ERROR] All rollouts failed at ep={ep} — skipping episode")
+            continue
 
         # Use best rollout for logging (mean r_inv across group)
         mean_r_inv = float(np.mean([r["r_inv"] for r in rollouts]))
@@ -875,12 +888,15 @@ def train(
             )
 
         # ── Update Red Queen curriculum with episode result ────────────
-        curriculum.update({
-            "scheme_type":    best_rollout["scheme_type"],
-            "f1":             best_rollout["f1"],
-            "morph_succeeded": False,
-            "novel_evaded":    False,
-        })
+        try:
+            curriculum.update({
+                "scheme_type":    best_rollout["scheme_type"],
+                "f1":             best_rollout["f1"],
+                "morph_succeeded": False,
+                "novel_evaded":    False,
+            })
+        except Exception as _cur_err:
+            print(f"  [WARN] curriculum.update ep={ep} failed: {_cur_err} — skipped")
 
         # ── Log ────────────────────────────────────────────────────────
         episode_results.append(best_rollout)
