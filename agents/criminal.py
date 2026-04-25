@@ -348,19 +348,34 @@ def validate_scheme(
         return False, f"Check 3 FAIL: No path from {source} to {sink}", None
     
     # ── Check 4: Transaction amounts realistic ($100 - $10M) ──────────
-    # Coerce path nodes to strings — LLM-generated schemes sometimes return
-    # dicts or other objects in full_path instead of plain node ID strings.
-    path = [str(n) if not isinstance(n, str) else n for n in path]
+    # Flatten path: LLM sometimes returns tuples, dicts, or numpy strings
+    # instead of plain node ID strings. Extract valid string node IDs only.
+    clean_path = []
+    for n in path:
+        if isinstance(n, str) and test_graph.graph.has_node(n):
+            clean_path.append(n)
+        elif isinstance(n, (list, tuple)):
+            # Edge tuple — extract individual node IDs
+            for item in n:
+                s = str(item)
+                if test_graph.graph.has_node(s):
+                    clean_path.append(s)
+        else:
+            s = str(n)
+            if test_graph.graph.has_node(s):
+                clean_path.append(s)
+    path = clean_path
 
     # Check all scheme edges (not just consecutive path pairs)
     scheme_edges = []
     for node in path:
-        if not test_graph.graph.has_node(node):
+        try:
+            for succ in test_graph.graph.successors(node):
+                edge_data = test_graph.graph[node][succ]
+                if edge_data.get("scheme_id") is not None:
+                    scheme_edges.append((node, succ, edge_data))
+        except Exception:
             continue
-        for succ in test_graph.graph.successors(node):
-            edge_data = test_graph.graph[node][succ]
-            if edge_data.get("scheme_id") is not None:
-                scheme_edges.append((node, succ, edge_data))
     
     if not scheme_edges:
         return False, "Check 4 FAIL: No scheme edges found", None
