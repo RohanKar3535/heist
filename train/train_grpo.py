@@ -137,15 +137,16 @@ SYSTEM_PROMPT = (
     "You are an elite AML investigator. Analyze the observation and choose ONE action.\n"
     "Available actions: " + ", ".join(ACTION_VOCAB) + ".\n\n"
     "PHASE STRATEGY:\n"
-    "  AlertTriage:    query_transactions on the flagged entity to confirm flows (need ≥2)\n"
-    "  Investigation:  trace_network to follow the money trail (need ≥5 traces)\n"
-    "  CrossReference: cross_reference_jurisdiction on offshore entities (need ≥3)\n"
-    "  SARFiling:      file_SAR immediately on your top suspects — every extra step hurts score!\n\n"
-    "EFFICIENCY RULE: In SARFiling phase, do NOT hesitate. File immediately.\n"
-    "Fewer steps used = higher query efficiency score = better total reward.\n\n"
+    "  AlertTriage:    query_transactions on flagged entity AND its neighbours (need ≥3 queries)\n"
+    "  Investigation:  trace_network on ALL suspicious entities — follow every hop (need ≥8 traces)\n"
+    "  CrossReference: cross_reference_jurisdiction on every offshore entity found (need ≥4)\n"
+    "  SARFiling:      file_SAR only after you have traced the FULL path source→sink\n\n"
+    "INVESTIGATION RULE: Do NOT file SAR until you have queried at least 15 entities.\n"
+    "Filing too early with incomplete evidence = low F1 = low reward.\n"
+    "The path has multiple hops — trace ALL of them before filing.\n\n"
     "EXACT FORMAT:\n"
     "  ACTION:<action_name> ENTITY:<entity_id>\n"
-    "  OR for SAR: ACTION:file_SAR ENTITIES:<e1>,<e2>,<e3>"
+    "  OR for SAR: ACTION:file_SAR ENTITIES:<e1>,<e2>,<e3>,<e4>,<e5>"
 )
 
 
@@ -390,6 +391,12 @@ def run_rollout(
         is_codex_generated=False,
     )
     r_inv = float(r_inv_result["total"])
+
+    # Premature SAR penalty: filing before step 15 with a tiny evidence chain
+    # means the model took a shortcut. Scale down reward sharply to break the
+    # "file at step 11 for efficiency" local minimum that GRPO gets stuck in.
+    if final_compliance > 0 and steps < 15 and len(evidence_chain) < 4:
+        r_inv *= 0.35
 
     # Assign terminal reward to last step only (sparse)
     if step_rewards:
@@ -784,10 +791,12 @@ def train(
         # Collect G rollouts (GRPO requires multiple samples per prompt)
         rollouts = []
         for g in range(GRPO_G):
-            # Spread temperature across rollouts: 0.5 (conservative) → 0.9 (exploratory).
-            # Capped at 0.9 (was 1.1) — values above ~1.0 produce near-zero-probability
-            # completions that cause log(~0) → NaN loss, killing the gradient update.
-            rollout_temp = 0.5 + (g / max(GRPO_G - 1, 1)) * 0.4
+            # Wide temperature spread: 0.1 (greedy/deterministic) → 1.3 (highly exploratory).
+            # Wide spread is critical for GRPO — it creates variance in rewards across the
+            # G rollouts so that (reward - mean) / std gives meaningful advantages.
+            # With narrow 0.5-0.9 range, all rollouts score ~0.21 → std≈0.02 → gradients≈0.
+            # NaN/Inf from temperature>1 is handled downstream — those steps are skipped.
+            rollout_temp = 0.1 + (g / max(GRPO_G - 1, 1)) * 1.2
             try:
                 # Expert enabled — preference drift reward feeds into compliance score
                 # which feeds into rewards[-1] → GRPO advantage. HF API handles the cost.

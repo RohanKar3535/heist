@@ -172,31 +172,36 @@ def _scheme_embedding(scheme_code: str) -> np.ndarray:
     """
     code = scheme_code.lower()
 
+    # Transaction type counts weighted 5x — these are the PRIMARY discriminators
+    # between scheme variants. Without upweighting, shared structural keywords
+    # (add_edge, jurisdiction, rng.choice) dominate the cosine similarity and
+    # ALL hybrids collapse to novelty≈0 regardless of which tx types they use.
+    TX_WEIGHT = 5.0
     features = np.array([
-        # Transaction types — core mechanic signals
-        code.count("cash_deposit"),
-        code.count("crypto_transfer"),
-        code.count("wire_transfer"),
-        code.count("trade_finance"),
-        code.count("swift"),
-        code.count("hawala"),
-        code.count("ach"),
-        code.count("check"),
-        # Node types used as intermediaries
-        code.count("shell_company"),
-        code.count("crypto_exchange"),
-        code.count("individual"),
-        code.count("account"),
-        # Structural patterns
-        code.count("add_edge"),        # total edges injected
-        code.count("for "),            # loop depth (smurfing = many loops)
-        code.count("phase"),           # multi-phase indicator
-        code.count("rng.choice"),      # branching / selection count
-        # Financial scale indicators
-        code.count("9999"),            # structuring amounts near $10k threshold
-        code.count("offshore"),        # offshore routing
-        code.count("jurisdiction"),    # cross-jurisdiction complexity
-        code.count("rng.uniform("),    # amount randomisation calls
+        # Transaction types — weighted 5x (primary discriminators)
+        code.count("cash_deposit")    * TX_WEIGHT,
+        code.count("crypto_transfer") * TX_WEIGHT,
+        code.count("wire_transfer")   * TX_WEIGHT,
+        code.count("trade_finance")   * TX_WEIGHT,
+        code.count("swift")           * TX_WEIGHT,
+        code.count("hawala")          * TX_WEIGHT,
+        code.count("ach")             * TX_WEIGHT,
+        code.count("check")           * TX_WEIGHT,
+        # Node types used as intermediaries (weighted 2x — still discriminative)
+        code.count("shell_company")   * 2.0,
+        code.count("crypto_exchange") * 2.0,
+        code.count("individual")      * 2.0,
+        code.count("account")         * 2.0,
+        # Structural patterns (weight 1x — shared across all schemes)
+        code.count("add_edge"),
+        code.count("for "),
+        code.count("phase"),
+        code.count("rng.choice"),
+        # Financial scale indicators (weight 1x)
+        code.count("9999"),
+        code.count("offshore"),
+        code.count("jurisdiction"),
+        code.count("rng.uniform("),
     ], dtype=np.float64)
 
     norm = np.linalg.norm(features)
