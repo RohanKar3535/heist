@@ -353,17 +353,21 @@ def run_rollout(
         if "compliance_score" in data:
             tool_compliance = float(data["compliance_score"])
             if expert is not None and evidence_chain:
-                ev_dicts = [{"entity_id": e} for e in evidence_chain]
-                risk_score = max(final_beliefs.values()) * 10.0 if final_beliefs else 5.0
-                exp_score, _ = expert.evaluate_SAR(
-                    evidence_chain=ev_dicts,
-                    risk_score=risk_score,
-                    narrative=completions[-1] if completions else "",
-                    episode_number=episode_num,
-                    query_count=steps,
-                )
-                # 60% F1-based tool compliance, 40% expert satisfaction (preference drift)
-                final_compliance = 0.6 * tool_compliance + 0.4 * exp_score
+                try:
+                    ev_dicts = [{"entity_id": e} for e in evidence_chain]
+                    risk_score = max(final_beliefs.values()) * 10.0 if final_beliefs else 5.0
+                    exp_score, _ = expert.evaluate_SAR(
+                        evidence_chain=ev_dicts,
+                        risk_score=risk_score,
+                        narrative=completions[-1] if completions else "",
+                        episode_number=episode_num,
+                        query_count=steps,
+                    )
+                    # 60% F1-based tool compliance, 40% expert satisfaction (preference drift)
+                    final_compliance = 0.6 * tool_compliance + 0.4 * exp_score
+                except Exception as _exp_err:
+                    # API timeout/rate-limit — fall back to tool score only, don't crash rollout
+                    final_compliance = tool_compliance
             else:
                 final_compliance = tool_compliance
 
@@ -864,12 +868,17 @@ def train(
                     print(f"  [WARN] NaN/Inf loss — skipping gradient update this episode")
                 loss_val = float("nan")
             else:
-                total_loss.backward()
-                torch.nn.utils.clip_grad_norm_(
-                    [p for p in model.parameters() if p.requires_grad], max_norm=0.5
-                )
-                optimizer.step()
-                loss_val = float(total_loss.item())
+                try:
+                    total_loss.backward()
+                    torch.nn.utils.clip_grad_norm_(
+                        [p for p in model.parameters() if p.requires_grad], max_norm=0.5
+                    )
+                    optimizer.step()
+                    loss_val = float(total_loss.item())
+                except Exception as _bwd_err:
+                    # CUDA OOM or other backward error — skip update, keep training
+                    print(f"  [WARN] backward() failed ep={ep}: {type(_bwd_err).__name__} — skipped")
+                    loss_val = float("nan")
         else:
             loss_val = 0.0
 
