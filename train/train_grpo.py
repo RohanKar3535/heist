@@ -104,6 +104,8 @@ LR              = float(os.environ.get("LR",          "5e-6"))  # 2e-5 caused ov
 CODEX_UPDATE_K  = int(os.environ.get("CODEX_K",      "5"))      # criminal.adapt() every K eps
 CKPT_EVERY      = int(os.environ.get("CKPT_EVERY",   "10"))     # checkpoint interval
 OUT_DIR         = os.environ.get("OUT_DIR",           os.path.join(_ROOT, "checkpoints"))
+RESUME_FROM     = os.environ.get("RESUME_FROM",       "")        # path to checkpoint dir to resume from; empty = start fresh
+START_EPISODE   = int(os.environ.get("START_EPISODE", "1"))      # episode number to start counting from (set to N+1 when resuming from ckpt_epN)
 CURVES_PATH     = os.environ.get("CURVES_PATH",       os.path.join(_ROOT, "training_curves.json"))
 LOG_CSV         = os.environ.get("LOG_CSV",           os.path.join(_ROOT, "training_log.csv"))
 
@@ -626,6 +628,8 @@ def train(
     print(f"  LR:            {LR}")
     print(f"  Codex update:  every {CODEX_UPDATE_K} episodes")
     print(f"  Checkpoint:    every {CKPT_EVERY} episodes -> {OUT_DIR}")
+    if RESUME_FROM and os.path.exists(RESUME_FROM):
+        print(f"  Resume from:   {RESUME_FROM}  (start_ep={START_EPISODE})")
     print()
 
     # ── Load model ─────────────────────────────────────────────────────
@@ -634,26 +638,37 @@ def train(
     if use_model:
         FastLanguageModel, torch, AutoTokenizer = _import_ml()
 
-        print("[1] Loading Qwen2.5-1.5B with Unsloth 4-bit quantization...")
-        model, tokenizer = FastLanguageModel.from_pretrained(
-            model_name=MODEL_NAME,
-            max_seq_length=MAX_SEQ_LEN,
-            load_in_4bit=True,  # 4-bit for T4 (fits in 16GB VRAM)
-            dtype=None,         # auto-detect bfloat16/float16
-        )
+        if RESUME_FROM and os.path.exists(RESUME_FROM):
+            # Resume from a saved checkpoint — LoRA adapters already merged into the
+            # checkpoint, so we load directly without calling get_peft_model again.
+            print(f"[1] Resuming from checkpoint: {RESUME_FROM}")
+            model, tokenizer = FastLanguageModel.from_pretrained(
+                model_name=RESUME_FROM,
+                max_seq_length=MAX_SEQ_LEN,
+                load_in_4bit=True,
+                dtype=None,
+            )
+        else:
+            print("[1] Loading Qwen2.5-1.5B with Unsloth 4-bit quantization...")
+            model, tokenizer = FastLanguageModel.from_pretrained(
+                model_name=MODEL_NAME,
+                max_seq_length=MAX_SEQ_LEN,
+                load_in_4bit=True,  # 4-bit for T4 (fits in 16GB VRAM)
+                dtype=None,         # auto-detect bfloat16/float16
+            )
 
-        # LoRA adapters (PEFT — only fine-tune adapter layers)
-        model = FastLanguageModel.get_peft_model(
-            model,
-            r=16,                       # LoRA rank
-            target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
-                             "gate_proj", "up_proj", "down_proj"],
-            lora_alpha=16,
-            lora_dropout=0,
-            bias="none",
-            use_gradient_checkpointing="unsloth",  # saves VRAM on T4
-            random_state=42,
-        )
+            # LoRA adapters (PEFT — only fine-tune adapter layers)
+            model = FastLanguageModel.get_peft_model(
+                model,
+                r=16,                       # LoRA rank
+                target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+                                 "gate_proj", "up_proj", "down_proj"],
+                lora_alpha=16,
+                lora_dropout=0,
+                bias="none",
+                use_gradient_checkpointing="unsloth",  # saves VRAM on T4
+                random_state=42,
+            )
 
         model.train()
         # Clear max_length from generation config so max_new_tokens doesn't
@@ -710,10 +725,12 @@ def train(
     }
 
     # ── Training loop ──────────────────────────────────────────────────
-    print(f"\n[3] Training for {num_episodes} episodes...\n")
+    start_ep = START_EPISODE
+    end_ep   = start_ep + num_episodes - 1
+    print(f"\n[3] Training for {num_episodes} episodes (ep {start_ep} → {end_ep})...\n")
     episode_results: List[Dict] = []
 
-    for ep in range(1, num_episodes + 1):
+    for ep in range(start_ep, end_ep + 1):
         t0 = time.time()
         seed = ep * 17  # deterministic but varied seeds
 
