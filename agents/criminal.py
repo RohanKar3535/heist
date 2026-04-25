@@ -348,9 +348,15 @@ def validate_scheme(
         return False, f"Check 3 FAIL: No path from {source} to {sink}", None
     
     # ── Check 4: Transaction amounts realistic ($100 - $10M) ──────────
+    # Coerce path nodes to strings — LLM-generated schemes sometimes return
+    # dicts or other objects in full_path instead of plain node ID strings.
+    path = [str(n) if not isinstance(n, str) else n for n in path]
+
     # Check all scheme edges (not just consecutive path pairs)
     scheme_edges = []
     for node in path:
+        if not test_graph.graph.has_node(node):
+            continue
         for succ in test_graph.graph.successors(node):
             edge_data = test_graph.graph[node][succ]
             if edge_data.get("scheme_id") is not None:
