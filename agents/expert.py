@@ -25,6 +25,8 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+HF_TOKEN       = os.environ.get("HF_TOKEN", "")
+HF_LLM_MODEL   = os.environ.get("HF_LLM_MODEL", "Qwen/Qwen2.5-72B-Instruct")
 GROQ_API_KEY   = os.environ.get("GROQ_API_KEY", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL   = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
@@ -93,8 +95,26 @@ Do NOT include markdown formatting like ```json or anything else. Just the raw J
 """
 
 def _call_gemini(prompt: str) -> Optional[str]:
-    """Call LLM API — Groq primary, Gemini fallback. Returns None immediately on rate limits."""
-    # ── Groq (primary) ────────────────────────────────────────────────
+    """Call LLM API — HF Inference → Groq → Gemini. Returns None immediately on rate limits."""
+    # ── HF Inference API (primary when HF_TOKEN set) ──────────────────
+    if HF_TOKEN:
+        try:
+            from huggingface_hub import InferenceClient
+            client = InferenceClient(api_key=HF_TOKEN)
+            response = client.chat.completions.create(
+                model=HF_LLM_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1024,
+                temperature=0.2,
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            err = str(e)
+            if "429" in err or "rate" in err.lower():
+                return None
+            print(f"[ComplianceExpert] HF error: {e}")
+
+    # ── Groq (secondary) ──────────────────────────────────────────────
     if GROQ_API_KEY:
         try:
             from groq import Groq

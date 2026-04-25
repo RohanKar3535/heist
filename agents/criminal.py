@@ -49,7 +49,9 @@ SCHEME_CATEGORIES: List[str] = [
     "structuring_variant", "crypto_variant", "trade_variant", "layering_variant",
 ]
 
-# LLM API config (Groq preferred, Gemini fallback)
+# LLM API config — priority: HF Inference API → Groq → Gemini
+HF_TOKEN       = os.environ.get("HF_TOKEN", "")
+HF_LLM_MODEL   = os.environ.get("HF_LLM_MODEL", "Qwen/Qwen2.5-72B-Instruct")
 GROQ_API_KEY   = os.environ.get("GROQ_API_KEY", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL   = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
@@ -429,8 +431,26 @@ Respond with ONLY the Python function code. No explanation. No markdown fencing.
 
 
 def _call_gemini(prompt: str) -> Optional[str]:
-    """Call LLM API — Groq primary, Gemini fallback."""
-    # ── Groq (primary) ────────────────────────────────────────────────
+    """Call LLM API — HF Inference → Groq → Gemini."""
+    # ── HF Inference API (primary when HF_TOKEN set) ──────────────────
+    if HF_TOKEN:
+        try:
+            from huggingface_hub import InferenceClient
+            client = InferenceClient(api_key=HF_TOKEN)
+            response = client.chat.completions.create(
+                model=HF_LLM_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=2048,
+                temperature=0.8,
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            err = str(e)
+            if "429" in err or "rate" in err.lower():
+                return None
+            print(f"[CriminalDesigner] HF error: {e}")
+
+    # ── Groq (secondary) ──────────────────────────────────────────────
     if GROQ_API_KEY:
         try:
             from groq import Groq
