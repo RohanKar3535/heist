@@ -327,72 +327,78 @@ def validate_scheme(
     if missing:
         return False, f"Check 2 FAIL: Missing ground truth keys: {missing}", None
     
-    # ── Check 3: Money actually moves from source to sink ───────────────
-    path = gt["full_path"]
-    if len(path) < 2:
-        return False, "Check 3 FAIL: Path too short (< 2 nodes)", None
-    
-    source = gt["source_entity"]
-    sink = gt["sink_entity"]
-    
-    if not test_graph.graph.has_node(source):
-        return False, f"Check 3 FAIL: Source {source} not in graph", None
-    if not test_graph.graph.has_node(sink):
-        return False, f"Check 3 FAIL: Sink {sink} not in graph", None
-    
-    # Verify reachability from source to sink through scheme edges
+    # ── Checks 3-5: Path/amount/reset — wrapped to catch any LLM garbage ──
+    # LLM-generated schemes may return tuples, numpy types, dicts, etc. as
+    # node IDs. Rather than trying to sanitize every possible bad structure,
+    # we catch ANY exception and treat it as a validation failure so training
+    # never crashes.
     import networkx as nx
     try:
-        nx.shortest_path(test_graph.graph, source, sink)
-    except nx.NetworkXNoPath:
-        return False, f"Check 3 FAIL: No path from {source} to {sink}", None
-    
-    # ── Check 4: Transaction amounts realistic ($100 - $10M) ──────────
-    # Flatten path: LLM sometimes returns tuples, dicts, or numpy strings
-    # instead of plain node ID strings. Extract valid string node IDs only.
-    clean_path = []
-    for n in path:
-        if isinstance(n, str) and test_graph.graph.has_node(n):
-            clean_path.append(n)
-        elif isinstance(n, (list, tuple)):
-            # Edge tuple — extract individual node IDs
-            for item in n:
-                s = str(item)
+        # ── Check 3: Money actually moves from source to sink ───────────
+        path = gt["full_path"]
+        if len(path) < 2:
+            return False, "Check 3 FAIL: Path too short (< 2 nodes)", None
+
+        source = gt["source_entity"]
+        sink   = gt["sink_entity"]
+
+        # Normalise source/sink to plain strings
+        if not isinstance(source, str):
+            source = str(source)
+        if not isinstance(sink, str):
+            sink = str(sink)
+
+        if not test_graph.graph.has_node(source):
+            return False, f"Check 3 FAIL: Source {source} not in graph", None
+        if not test_graph.graph.has_node(sink):
+            return False, f"Check 3 FAIL: Sink {sink} not in graph", None
+
+        try:
+            nx.shortest_path(test_graph.graph, source, sink)
+        except (nx.NetworkXNoPath, nx.NodeNotFound, nx.NetworkXError):
+            return False, f"Check 3 FAIL: No path from {source} to {sink}", None
+
+        # ── Check 4: Transaction amounts realistic ($100 - $10M) ────────
+        # Flatten path: LLM may return tuples, dicts, numpy types, etc.
+        clean_path: list = []
+        for n in path:
+            if isinstance(n, (list, tuple)):
+                for item in n:
+                    s = str(item)
+                    if test_graph.graph.has_node(s):
+                        clean_path.append(s)
+            elif isinstance(n, dict):
+                # e.g. {"src": "acc_1", "tgt": "acc_2"} — skip silently
+                pass
+            else:
+                s = str(n) if not isinstance(n, str) else n
                 if test_graph.graph.has_node(s):
                     clean_path.append(s)
-        else:
-            s = str(n)
-            if test_graph.graph.has_node(s):
-                clean_path.append(s)
-    path = clean_path
 
-    # Check all scheme edges (not just consecutive path pairs)
-    scheme_edges = []
-    for node in path:
-        try:
+        scheme_edges = []
+        for node in clean_path:
             for succ in test_graph.graph.successors(node):
                 edge_data = test_graph.graph[node][succ]
                 if edge_data.get("scheme_id") is not None:
                     scheme_edges.append((node, succ, edge_data))
-        except Exception:
-            continue
-    
-    if not scheme_edges:
-        return False, "Check 4 FAIL: No scheme edges found", None
-    
-    for src, tgt, edge_data in scheme_edges:
-        amount = edge_data.get("amount", 0)
-        if amount < MIN_TRANSACTION_AMOUNT:
-            return False, f"Check 4 FAIL: Amount too low: ${amount:.2f}", None
-        if amount > MAX_TRANSACTION_AMOUNT:
-            return False, f"Check 4 FAIL: Amount too high: ${amount:.2f}", None
-    
-    # ── Check 5: Clean reset ───────────────────────────────────────────
-    try:
+
+        if not scheme_edges:
+            return False, "Check 4 FAIL: No scheme edges found", None
+
+        for src, tgt, edge_data in scheme_edges:
+            amount = edge_data.get("amount", 0)
+            if amount < MIN_TRANSACTION_AMOUNT:
+                return False, f"Check 4 FAIL: Amount too low: ${amount:.2f}", None
+            if amount > MAX_TRANSACTION_AMOUNT:
+                return False, f"Check 4 FAIL: Amount too high: ${amount:.2f}", None
+
+        # ── Check 5: Clean reset ─────────────────────────────────────────
         test_graph.reset()
+
     except Exception as e:
-        return False, f"Check 5 FAIL: Reset error: {e}", None
-    
+        # Catch-all: any bad node type, missing attr, or NetworkX error → fail
+        return False, f"Check 3-5 FAIL: Unexpected error ({type(e).__name__}): {e}", None
+
     return True, "All 5 validation checks passed", gt
 
 
