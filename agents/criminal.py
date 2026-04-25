@@ -560,21 +560,25 @@ def _generate_fallback_variant(
     """
     variant_id = int(rng.integers(1000, 9999))
 
-    # Prefer hybrid (multi-phase) schemes for structural novelty
+    # Always prefer hybrid (multi-phase) schemes: they combine multiple
+    # transaction types and node types, giving maximally diverse keyword
+    # fingerprints that the structural novelty check can distinguish.
+    # Pick a hybrid combination that targets the weakness, cycling through
+    # all 4 combinations to ensure codex variety across codex updates.
     hybrid_types = [
         ("structuring", "crypto"),
         ("crypto", "layering"),
         ("trade", "structuring"),
         ("layering", "trade"),
     ]
-    for a, b in hybrid_types:
-        if a in target or b in target:
-            code = _build_hybrid_variant(variant_id, phase1=a, phase2=b)
-            fn = _compile_function(code)
-            if fn is not None:
-                return fn, code
+    # Rotate hybrid selection based on variant_id for variety
+    combo = hybrid_types[variant_id % len(hybrid_types)]
+    code = _build_hybrid_variant(variant_id, phase1=combo[0], phase2=combo[1])
+    fn = _compile_function(code)
+    if fn is not None:
+        return fn, code
 
-    # Single-type fallback
+    # Single-type fallback (only if hybrid compilation fails)
     if "structuring" in target or "smurfing" in target:
         n_mules = int(rng.integers(3, 9))
         code = _build_structuring_variant(n_mules, variant_id)
@@ -938,17 +942,27 @@ class CriminalDesigner:
                 info["validation_error"] = reason
                 continue
             
-            # Compute novelty
+            # Compute novelty (min cosine distance to nearest existing scheme)
             existing_codes = get_codex_source_codes()
             novelty = compute_novelty_bonus(code, existing_codes)
             info["novelty_bonus"] = novelty
+
+            # Reject structural duplicates: if the new scheme is too similar
+            # to an existing codex scheme (novelty < 0.05), the criminal is
+            # just re-generating the same attack. Skip codex append and retry
+            # so the codex only grows with genuinely different schemes.
+            if existing_codes and novelty < 0.05:
+                info["penalty"] -= 0.05
+                info["validation_error"] = "structural_duplicate (novelty < 0.05)"
+                continue
+
             info["validated"] = True
-            
+
             # Append to Codex
             self._generation_count += 1
             scheme_name = f"gen_{self._generation_count}_{target}"
             append_to_codex(code, scheme_name, target, self._episode_count)
-            
+
             return fn, info
         
         # All attempts failed
@@ -978,6 +992,110 @@ class CriminalDesigner:
             morph_success=morph_success,
         )
     
+    def synthesize_zero_day(
+        self,
+        top_schemes: List[str],
+        episode_number: int = 0,
+    ) -> Tuple[Optional[callable], Dict[str, Any]]:
+        """
+        Compose a Zero-Day scheme from the hardest schemes (by ELO).
+
+        Instead of randomly generating a novel scheme, we instruct the LLM to
+        combine the evasion strategies of the 3 schemes the investigator
+        struggles with most. This makes the Zero-Day provably hard by construction:
+        if the investigator fails on A, B, C individually, a scheme that combines
+        all three evasion patterns will be even harder to detect.
+
+        Returns (scheme_fn, info_dict) — scheme_fn is None if generation fails.
+        """
+        if not top_schemes:
+            return None, {"error": "no top schemes provided"}
+
+        # Describe each hard scheme's evasion strategy
+        evasion_descriptions = {
+            "smurfing":           "splitting large amounts into many small cash deposits near $10k threshold",
+            "structuring":        "structuring deposits across multiple mule accounts to avoid CTR",
+            "crypto_mixing":      "routing funds through multiple crypto exchanges to obscure origin",
+            "layering":           "cascading wire transfers through shell companies across jurisdictions",
+            "shell_company":      "using nested shell companies with trade_finance invoices to clean funds",
+            "trade_based":        "over/under-invoicing trade transactions to move value across borders",
+            "crypto_variant":     "multi-hop crypto transfers through offshore exchanges",
+            "trade_variant":      "trade mispricing through shell intermediaries in high-secrecy jurisdictions",
+            "layering_variant":   "multi-shell layering with SWIFT international wire transfers",
+            "structuring_variant":"mule network structuring with sub-threshold cash deposits",
+        }
+
+        strategies = []
+        for s in top_schemes[:3]:
+            desc = evasion_descriptions.get(s, f"complex {s} evasion pattern")
+            strategies.append(f"- {s}: {desc}")
+
+        zero_day_prompt = f"""\
+You are a financial crime designer AI creating a Zero-Day money laundering scheme.
+
+The investigator AI has been trained and is weakest against these three patterns:
+{chr(10).join(strategies)}
+
+Your task: synthesize a SINGLE Python function that COMBINES all three evasion strategies
+into one coordinated multi-phase attack. This scheme should:
+1. Use Phase 1 from the first pattern, Phase 2 from the second, Phase 3 from the third
+2. Deliberately route through jurisdictions and node types that exploit each weakness
+3. Be structurally different from any single scheme type
+
+Write a Python function with signature: def inject_zero_day(graph, rng=None) -> dict:
+Requirements:
+- Pick nodes from graph.graph.nodes(data=True) using node_type filters
+- Use rng (numpy Generator) for all randomness
+- Add edges: graph.graph.add_edge(src, tgt, amount=..., timestamp=..., transaction_type=..., jurisdiction=..., suspicion_weight=..., scheme_id=...)
+- Track: graph._injected[scheme_id] = {{"edges": [...], "nodes": []}}
+- Store: graph.ground_truth[scheme_id] = gt
+- Return: dict with keys source_entity, sink_entity, full_path, scheme_type, num_hops, intermediate_nodes
+- Use scheme_id = "zero_day_{{int(rng.integers(1000,9999))}}"
+- Amounts must be $100 - $10,000,000
+- scheme_type in return dict should be "zero_day"
+
+Respond with ONLY the Python function. No explanation. No markdown fencing.
+"""
+
+        print(f"\n[ZeroDay] Synthesizing Zero-Day from top schemes: {top_schemes[:3]}")
+        response = _call_gemini(zero_day_prompt)
+
+        if response:
+            code = _extract_function_code(response)
+            if code:
+                fn = _compile_function(code)
+                if fn:
+                    passed, reason, gt = validate_scheme(fn)
+                    if passed:
+                        existing_codes = get_codex_source_codes()
+                        novelty = compute_novelty_bonus(code, existing_codes)
+                        append_to_codex(code, "zero_day", "zero_day", episode_number)
+                        print(f"[ZeroDay] Synthesized and validated. Structural novelty={novelty:.3f}")
+                        return fn, {
+                            "validated": True,
+                            "novelty_bonus": novelty,
+                            "target_schemes": top_schemes[:3],
+                            "code": code,
+                        }
+                    else:
+                        print(f"[ZeroDay] Validation failed: {reason}")
+
+        # Fallback: build hybrid of top 2 schemes
+        print("[ZeroDay] LLM unavailable — using hybrid fallback")
+        phase1 = top_schemes[0].replace("_variant", "").replace("_company", "")
+        phase2 = top_schemes[1].replace("_variant", "").replace("_company", "") if len(top_schemes) > 1 else "crypto"
+        vid = int(self._rng.integers(1000, 9999))
+        code = _build_hybrid_variant(vid, phase1=phase1[:10], phase2=phase2[:10])
+        fn = _compile_function(code)
+        existing_codes = get_codex_source_codes()
+        novelty = compute_novelty_bonus(code, existing_codes) if fn else 0.0
+        return fn, {
+            "validated": fn is not None,
+            "novelty_bonus": novelty,
+            "target_schemes": top_schemes[:3],
+            "fallback": True,
+        }
+
     @property
     def codex_size(self) -> int:
         """Number of schemes in the Codex."""

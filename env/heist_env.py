@@ -125,7 +125,13 @@ class HeistEnvironment(Environment):
 
         rng = np.random.default_rng(seed if seed is not None else 42)
         self._rng = rng
-        scheme_type = str(rng.choice(SCHEME_TYPES))
+        # Accept preferred scheme_type from curriculum (Red Queen targeting).
+        # Falls back to random if not provided or not a valid type.
+        preferred = kwargs.get("scheme_type", None)
+        scheme_type = (
+            str(preferred) if (preferred and str(preferred) in SCHEME_TYPES)
+            else str(rng.choice(SCHEME_TYPES))
+        )
         scheme_id   = self._graph.inject_scheme(scheme_type)
         gt          = self._graph.ground_truth[scheme_id]
         flagged_entity = gt["source_entity"]

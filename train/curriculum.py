@@ -98,7 +98,14 @@ class RedQueenCurriculum:
         # weakness_vector[scheme_type] = 1 - F1  (higher = harder for investigator)
         self.weakness_vector: Dict[str, float] = {s: 0.5 for s in self.scheme_types}
 
-        # ELO ratings (start at 1200 each)
+        # Per-scheme ELO: how hard each scheme is for the current investigator.
+        # Starts at 1200. Rises when criminal evades (F1 < 0.4), falls when
+        # investigator catches it (F1 > 0.6). Drives scheme selection:
+        # high-ELO schemes are sampled more → forces investigator to improve
+        # on its hardest adversaries (proper Red Queen dynamics).
+        self.scheme_elo: Dict[str, float] = {s: 1200.0 for s in self.scheme_types}
+
+        # Global ELO (criminal aggregate vs investigator aggregate)
         self.criminal_elo:    float = 1200.0
         self.investigator_elo: float = 1200.0
 
@@ -140,7 +147,10 @@ class RedQueenCurriculum:
         # Accumulate for batch logging
         self._batch_f1[scheme].append(f1)
 
-        # ELO update
+        # Per-scheme ELO update
+        self._update_scheme_elo(scheme, f1)
+
+        # Global ELO update
         morph_succeeded = bool(episode_result.get("morph_succeeded", False))
         novel_evaded    = bool(episode_result.get("novel_evaded", False))
         self._update_elo(f1, morph_succeeded, novel_evaded)
@@ -165,11 +175,25 @@ class RedQueenCurriculum:
         return {k: float(p) for k, p in zip(keys, probs)}
 
     def select_scheme_type(self, episode: Optional[int] = None) -> str:
-        """Sample one scheme type according to the curriculum distribution."""
-        dist  = self.sampling_distribution(episode)
-        keys  = list(dist.keys())
-        probs = np.array([dist[k] for k in keys])
-        return str(np.random.choice(keys, p=probs))
+        """
+        Sample one scheme type driven by per-scheme ELO.
+
+        High-ELO schemes (criminal winning) are sampled proportionally more
+        so the investigator is forced to improve on its hardest adversaries.
+        Temperature T=400 matches the standard ELO scale so that a 400-point
+        gap doubles the probability of the harder scheme being selected.
+        """
+        keys = list(self.scheme_elo.keys())
+        elos = np.array([self.scheme_elo[k] for k in keys], dtype=np.float64)
+        v = elos / 400.0          # normalise to ELO scale
+        v -= v.max()              # numerical stability
+        weights = np.exp(v)
+        weights /= weights.sum()
+        return str(np.random.choice(keys, p=weights))
+
+    def top_schemes_by_elo(self, n: int = 3) -> List[str]:
+        """Return the n highest-ELO (hardest) scheme types. Used for Zero-Day synthesis."""
+        return sorted(self.scheme_elo, key=lambda s: -self.scheme_elo[s])[:n]
 
     def elo_summary(self) -> Dict[str, float]:
         return {
@@ -193,7 +217,47 @@ class RedQueenCurriculum:
             self._f1_history = _read_json(F1_HISTORY_PATH)
 
     # ------------------------------------------------------------------ #
-    # ELO update                                                           #
+    # Per-scheme ELO                                                       #
+    # ------------------------------------------------------------------ #
+
+    def _update_scheme_elo(self, scheme: str, investigator_f1: float) -> None:
+        """
+        Update the ELO rating for a specific scheme type.
+
+        The scheme is treated as the opponent; the investigator is the fixed
+        reference player at 1200. ELO rises when criminal evades (F1 < 0.4),
+        falls when investigator catches it (F1 > 0.6), draws otherwise.
+        Clamped to [800, 1600] so no scheme dominates permanently.
+        """
+        if scheme not in self.scheme_elo:
+            self.scheme_elo[scheme] = 1200.0
+
+        current = self.scheme_elo[scheme]
+        # Expected probability that scheme "wins" (evades investigator)
+        E = 1.0 / (1.0 + 10.0 ** ((1200.0 - current) / 400.0))
+
+        if investigator_f1 < 0.4:
+            outcome = 1.0   # scheme evaded — criminal wins
+        elif investigator_f1 > 0.6:
+            outcome = 0.0   # investigator caught it — criminal loses
+        else:
+            outcome = 0.5   # draw
+
+        self.scheme_elo[scheme] = max(800.0, min(1600.0,
+            current + self.elo_k * (outcome - E)
+        ))
+
+    def scheme_elo_table(self) -> str:
+        """Human-readable ELO leaderboard for logging / demo."""
+        rows = sorted(self.scheme_elo.items(), key=lambda x: -x[1])
+        lines = ["  Scheme ELO Leaderboard (↑ = harder for investigator):"]
+        for rank, (scheme, elo) in enumerate(rows, 1):
+            bar = "█" * int((elo - 800) / 40)   # visual bar: 800→"", 1600→"████████████████████"
+            lines.append(f"  {rank:2d}. {scheme:<22s} {elo:7.1f}  {bar}")
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------ #
+    # Global ELO update                                                    #
     # ------------------------------------------------------------------ #
 
     def _expected_outcome(self, rating_a: float, rating_b: float) -> float:
@@ -272,6 +336,9 @@ class RedQueenCurriculum:
 
         # Reset batch accumulators
         self._batch_f1 = {s: [] for s in self.scheme_types}
+
+        # Print ELO table every flush so the arms race is visible in logs
+        print(self.scheme_elo_table())
 
         # Persist
         self.save()

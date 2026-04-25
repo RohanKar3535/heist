@@ -88,6 +88,7 @@ def _import_ml():
 from heist_env import HeistEnvironment
 from models import InvestigatorAction, ActionType
 from reward import r_investigator
+from curriculum import RedQueenCurriculum
 
 # ---------------------------------------------------------------------------
 # Config
@@ -248,9 +249,13 @@ def run_rollout(
     expert=None,
     episode_num: int = 0,
     temperature: float = 0.7,
+    preferred_scheme_type: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Run one complete episode.
+
+    preferred_scheme_type: if set, passed to env.reset() so the Red Queen
+    curriculum drives which scheme the investigator faces this episode.
 
     Returns a dict with:
         prompts:     List[str]   — text prompt at each step
@@ -260,7 +265,7 @@ def run_rollout(
         scheme_type: str
         f1_by_type:  Dict[str, float]
     """
-    obs = env.reset(seed=seed)
+    obs = env.reset(seed=seed, scheme_type=preferred_scheme_type)
     obs_dict = obs.model_dump()
     scheme_type = obs_dict.get("metadata", {}).get("scheme_type", "unknown")
 
@@ -269,6 +274,7 @@ def run_rollout(
     step_rewards: List[float] = []
     evidence_chain: List[str] = []
     subpoenaed: set = set()
+    action_type_log: List[str] = []   # interpretability: track action distribution
 
     done = False
     steps = 0
@@ -336,6 +342,7 @@ def run_rollout(
         prompts.append(prompt_text)
         completions.append(generated)
         step_rewards.append(step_r)
+        action_type_log.append(action_type_str)   # track for entropy
 
         done = bool(obs_dict.get("done", False))
         final_beliefs = obs_dict.get("bayesian_beliefs", {})
@@ -395,16 +402,36 @@ def run_rollout(
     else:
         f1 = 0.0
 
+    # ── Interpretability metrics ───────────────────────────────────────
+    # Action entropy: H = -Σ p(a) log p(a). Low entropy = more decisive.
+    # Tracks whether the model is learning a coherent strategy or acting randomly.
+    action_counts: Dict[str, int] = {}
+    for a in action_type_log:
+        action_counts[a] = action_counts.get(a, 0) + 1
+    if action_counts:
+        total_acts = len(action_type_log)
+        import math as _math
+        action_entropy = -sum(
+            (c / total_acts) * _math.log(c / total_acts + 1e-9)
+            for c in action_counts.values()
+        )
+    else:
+        action_entropy = 0.0
+    first_action = action_type_log[0] if action_type_log else "none"
+
     return {
-        "prompts":     prompts,
-        "completions": completions,
-        "rewards":     step_rewards,
-        "r_inv":       r_inv,
-        "scheme_type": scheme_type,
-        "f1":          f1,
-        "f1_by_type":  {scheme_type: f1},
-        "steps":       steps,
-        "compliance":  final_compliance,
+        "prompts":        prompts,
+        "completions":    completions,
+        "rewards":        step_rewards,
+        "r_inv":          r_inv,
+        "scheme_type":    scheme_type,
+        "f1":             f1,
+        "f1_by_type":     {scheme_type: f1},
+        "steps":          steps,
+        "compliance":     final_compliance,
+        "action_entropy": round(action_entropy, 4),
+        "first_action":   first_action,
+        "action_counts":  action_counts,
     }
 
 
@@ -698,6 +725,10 @@ def train(
     except Exception as e:
         print(f"  CriminalDesigner not available: {e}")
 
+    # Red Queen Curriculum (ELO-driven scheme selection)
+    curriculum = RedQueenCurriculum()
+    print("  RedQueenCurriculum loaded (ELO-driven scheme selection).")
+
     # Compliance Expert (preference drift — wired into run_rollout compliance score)
     expert = None
     try:
@@ -737,6 +768,11 @@ def train(
         if verbose:
             print(f"Episode {ep:3d}/{num_episodes}", end="  ")
 
+        # Red Queen: pick scheme type for this episode via ELO-weighted curriculum.
+        # Previously env.reset() chose randomly → trade_based could dominate by luck.
+        # Now the curriculum drives selection: high-ELO (hard) schemes sampled more.
+        target_scheme = curriculum.select_scheme_type(ep)
+
         # Collect G rollouts (GRPO requires multiple samples per prompt)
         rollouts = []
         for g in range(GRPO_G):
@@ -757,6 +793,7 @@ def train(
                 expert=None,
                 episode_num=ep,
                 temperature=rollout_temp,
+                preferred_scheme_type=target_scheme,
             )
             rollouts.append(rollout)
 
@@ -827,14 +864,24 @@ def train(
         elapsed = time.time() - t0
 
         if verbose:
+            entropy_str = f"| H(a)={best_rollout.get('action_entropy', 0):.2f} "
             print(
                 f"| scheme={best_rollout['scheme_type']:12s} "
                 f"| R_inv={mean_r_inv:.3f} "
                 f"| F1={best_rollout['f1']:.3f} "
                 f"| steps={best_rollout['steps']:2d} "
                 f"| loss={loss_val:.4f} "
+                f"{entropy_str}"
                 f"| {elapsed:.1f}s"
             )
+
+        # ── Update Red Queen curriculum with episode result ────────────
+        curriculum.update({
+            "scheme_type":    best_rollout["scheme_type"],
+            "f1":             best_rollout["f1"],
+            "morph_succeeded": False,
+            "novel_evaded":    False,
+        })
 
         # ── Log ────────────────────────────────────────────────────────
         episode_results.append(best_rollout)
@@ -874,6 +921,56 @@ def train(
     print(f"  Per-scheme F1 log  saved to {LOG_CSV}")
     if use_model:
         print(f"  Checkpoints in {OUT_DIR}")
+
+    # ── Interpretability summary ───────────────────────────────────────
+    entropies = [r.get("action_entropy", 0.0) for r in episode_results if r.get("action_entropy") is not None]
+    if entropies:
+        first5  = float(np.mean(entropies[:5]))
+        last5   = float(np.mean(entropies[-5:]))
+        print(f"\n  [Interpretability] Action entropy:")
+        print(f"    First 5 eps avg:  H={first5:.3f}  (higher = more random)")
+        print(f"    Last  5 eps avg:  H={last5:.3f}  (lower  = more decisive)")
+        if last5 < first5 - 0.05:
+            print(f"    ✓ Agent became MORE decisive over training (ΔH={last5-first5:.3f})")
+        else:
+            print(f"    ~ No clear decisiveness improvement (ΔH={last5-first5:.3f})")
+
+    # ── Final ELO table ────────────────────────────────────────────────
+    print(f"\n  [RedQueen] Final ELO standings:")
+    print(curriculum.scheme_elo_table())
+
+    # ── Zero-Day synthesis ─────────────────────────────────────────────
+    # Synthesize a coordinated attack from the 3 hardest schemes (by ELO).
+    # This scheme is engineered from the investigator's own failure modes.
+    if criminal_designer is not None:
+        top3 = curriculum.top_schemes_by_elo(n=3)
+        print(f"\n  [ZeroDay] Synthesizing from top-ELO schemes: {top3}")
+        zd_fn, zd_info = criminal_designer.synthesize_zero_day(top3, episode_number=end_ep)
+        if zd_info.get("validated"):
+            print(f"  [ZeroDay] ✓ Validated. Structural novelty={zd_info['novelty_bonus']:.3f}")
+            # Run 2 heuristic rollouts against the Zero-Day to measure baseline detection
+            print(f"  [ZeroDay] Running heuristic detection eval...")
+            zd_f1_scores = []
+            for zd_seed in [7777, 8888]:
+                zd_rollout = run_rollout(
+                    env=env, model=None, tokenizer=None,
+                    seed=zd_seed, use_model=False, verbose=False,
+                    expert=None, episode_num=end_ep,
+                )
+                zd_f1_scores.append(zd_rollout["f1"])
+            zd_f1 = float(np.mean(zd_f1_scores))
+
+            # Compare against mean F1 on known schemes
+            known_f1 = float(np.mean(curves["f1"][-10:])) if curves["f1"] else 0.0
+            print(f"  [ZeroDay] Heuristic F1 on Zero-Day: {zd_f1:.3f}")
+            print(f"  [ZeroDay] Known-scheme F1 (last 10 ep): {known_f1:.3f}")
+            gap = known_f1 - zd_f1
+            if gap > 0.05:
+                print(f"  [ZeroDay] ✓ F1 gap = {gap:.3f} — Zero-Day harder than known schemes!")
+            else:
+                print(f"  [ZeroDay] ~ F1 gap = {gap:.3f} — Zero-Day not significantly harder")
+        else:
+            print(f"  [ZeroDay] Generation failed: {zd_info.get('validation_error', 'unknown')}")
 
     # Summary stats
     r_invs = curves["r_inv"]
