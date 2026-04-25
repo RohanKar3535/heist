@@ -780,9 +780,8 @@ def train(
             # Capped at 0.9 (was 1.1) — values above ~1.0 produce near-zero-probability
             # completions that cause log(~0) → NaN loss, killing the gradient update.
             rollout_temp = 0.5 + (g / max(GRPO_G - 1, 1)) * 0.4
-            # Don't pass expert to rollouts — ComplianceExpert burns ~1400 Groq tokens
-            # per call × 6 rollouts × 50 episodes = 420k tokens, exhausting the 500k/day
-            # limit by ep35. Expert compliance is kept for the best-rollout log only.
+            # Expert enabled — preference drift reward feeds into compliance score
+            # which feeds into rewards[-1] → GRPO advantage. HF API handles the cost.
             rollout = run_rollout(
                 env=env,
                 model=model,
@@ -790,7 +789,7 @@ def train(
                 seed=seed + g,
                 use_model=use_model,
                 verbose=False,
-                expert=None,
+                expert=expert,
                 episode_num=ep,
                 temperature=rollout_temp,
                 preferred_scheme_type=target_scheme,
