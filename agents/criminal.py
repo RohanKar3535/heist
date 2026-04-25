@@ -648,60 +648,84 @@ def _generate_fallback_variant(
 
 def _build_hybrid_variant(vid: int, phase1: str = "structuring", phase2: str = "crypto") -> str:
     """
-    Multi-phase combinatorial scheme: combines two different laundering techniques.
-    Phase 1: smurfing/structuring (individual → mule accounts via cash_deposit)
-    Phase 2: crypto mixing (mule accounts → crypto exchange → offshore shell)
-    Phase 3: integration (shell → clean account via swift)
+    Multi-phase combinatorial scheme. Each (phase1, phase2) combo uses a DISTINCT
+    set of transaction types so the keyword-based novelty embedding produces
+    genuinely different vectors — preventing novelty=0.000 on every fallback.
+
+    Combo → dominant tx types (determines keyword fingerprint):
+        structuring+crypto  → cash_deposit  + crypto_transfer  (no wire/swift/trade)
+        crypto+layering     → crypto_transfer + wire_transfer  (no cash/swift/trade)
+        trade+structuring   → trade_finance + hawala           (no crypto/wire/swift)
+        layering+trade      → swift + wire_transfer + trade_finance (no cash/crypto)
     """
+    # Map each phase to its EXCLUSIVE transaction type — this is what makes
+    # the keyword vectors different across combos.
+    _TX = {
+        "structuring": "cash_deposit",
+        "crypto":      "crypto_transfer",
+        "trade":       "trade_finance",
+        "layering":    "wire_transfer",
+    }
+    tx1 = _TX.get(phase1, "cash_deposit")
+    tx2 = _TX.get(phase2, "wire_transfer")
+    # Integration leg uses the combo-specific finishing tx (not always swift)
+    finish_tx = "swift" if phase2 in ("layering", "crypto") else "ach"
+
     return textwrap.dedent(f'''\
     def inject_scheme_hybrid_{vid}(graph, rng=None):
-        """Codex Generated — Hybrid {phase1}+{phase2} scheme {vid}: 3-phase combinatorial attack."""
+        """Codex Generated — Hybrid {phase1}+{phase2} scheme {vid}."""
         import numpy as np
         rng = rng or np.random.default_rng()
         individuals = [n for n, d in graph.graph.nodes(data=True) if d.get("node_type") == "individual"]
-        accounts = [n for n, d in graph.graph.nodes(data=True) if d.get("node_type") == "account"]
-        cryptos = [n for n, d in graph.graph.nodes(data=True) if d.get("node_type") == "crypto_exchange"]
-        shells = [n for n, d in graph.graph.nodes(data=True) if d.get("node_type") == "shell_company"]
-        source = str(rng.choice(individuals))
-        n_mules = int(rng.integers(2, 5))
-        mules = [str(x) for x in rng.choice([a for a in accounts if a != source], min(n_mules, len(accounts)-1), replace=False)]
+        accounts    = [n for n, d in graph.graph.nodes(data=True) if d.get("node_type") == "account"]
+        cryptos     = [n for n, d in graph.graph.nodes(data=True) if d.get("node_type") == "crypto_exchange"]
+        shells      = [n for n, d in graph.graph.nodes(data=True) if d.get("node_type") == "shell_company"]
+        source   = str(rng.choice(individuals))
+        n_mules  = int(rng.integers(2, 5))
+        mules    = [str(x) for x in rng.choice([a for a in accounts if a != source], min(n_mules, len(accounts)-1), replace=False)]
         exchange = str(rng.choice(cryptos))
-        shell = str(rng.choice(shells))
-        sink = str(rng.choice([a for a in accounts if a != source and a not in mules]))
-        scheme_id = f"codex_hybrid_{vid}_{{int(rng.integers(1000,9999))}}"
-        base_ts = int(rng.integers(1672531200, 1704067200))
+        shell    = str(rng.choice(shells))
+        sink     = str(rng.choice([a for a in accounts if a != source and a not in mules]))
+        scheme_id   = f"codex_hybrid_{vid}_{{int(rng.integers(1000,9999))}}"
+        base_ts     = int(rng.integers(1672531200, 1704067200))
         base_amount = float(rng.uniform(30000, 200000))
         edges = []
-        # Phase 1: structuring — source deposits to mules (cash_deposit, under $10k)
+        # Phase 1 ({phase1}) — source → mules using {tx1}
         for i, m in enumerate(mules):
-            amt = float(rng.uniform(8000.0, 9999.0))
+            amt   = float(rng.uniform(8000.0, 9999.0))
             prior = dict(graph.graph[source][m]) if graph.graph.has_edge(source, m) else None
-            graph.graph.add_edge(source, m, amount=amt, timestamp=base_ts + i * int(rng.integers(3600, 14400)),
-                transaction_type="cash_deposit", jurisdiction=graph.graph.nodes[source].get("jurisdiction", "US"),
+            graph.graph.add_edge(source, m, amount=amt,
+                timestamp=base_ts + i * int(rng.integers(3600, 14400)),
+                transaction_type="{tx1}",
+                jurisdiction=graph.graph.nodes[source].get("jurisdiction", "US"),
                 suspicion_weight=float(rng.uniform(0.75, 0.90)), scheme_id=scheme_id)
             edges.append({{"src": source, "tgt": m, "prior": prior}})
-        # Phase 2: crypto mixing — mules aggregate into exchange (crypto_transfer)
+        # Phase 2 ({phase2}) — mules → exchange using {tx2}
         for i, m in enumerate(mules):
-            amt = base_amount / max(len(mules), 1) * float(rng.uniform(0.90, 1.05))
+            amt   = base_amount / max(len(mules), 1) * float(rng.uniform(0.90, 1.05))
             prior = dict(graph.graph[m][exchange]) if graph.graph.has_edge(m, exchange) else None
-            graph.graph.add_edge(m, exchange, amount=amt, timestamp=base_ts + n_mules * 14400 + i * 7200,
-                transaction_type="crypto_transfer", jurisdiction=graph.graph.nodes[exchange].get("jurisdiction", "MT"),
+            graph.graph.add_edge(m, exchange, amount=amt,
+                timestamp=base_ts + n_mules * 14400 + i * 7200,
+                transaction_type="{tx2}",
+                jurisdiction=graph.graph.nodes[exchange].get("jurisdiction", "MT"),
                 suspicion_weight=float(rng.uniform(0.70, 0.88)), scheme_id=scheme_id)
             edges.append({{"src": m, "tgt": exchange, "prior": prior}})
-        # Phase 3: layering — exchange to offshore shell (wire_transfer)
-        amt3 = base_amount * float(rng.uniform(0.88, 0.96))
+        # Phase 3 — exchange → shell using {tx2}
+        amt3  = base_amount * float(rng.uniform(0.88, 0.96))
         prior = dict(graph.graph[exchange][shell]) if graph.graph.has_edge(exchange, shell) else None
         graph.graph.add_edge(exchange, shell, amount=amt3,
             timestamp=base_ts + (n_mules * 2) * 7200 + 86400,
-            transaction_type="wire_transfer", jurisdiction=graph.graph.nodes[shell].get("jurisdiction", "KY"),
+            transaction_type="{tx2}",
+            jurisdiction=graph.graph.nodes[shell].get("jurisdiction", "KY"),
             suspicion_weight=float(rng.uniform(0.80, 0.95)), scheme_id=scheme_id)
         edges.append({{"src": exchange, "tgt": shell, "prior": prior}})
-        # Phase 4: integration — shell to clean account (swift)
-        amt4 = amt3 * float(rng.uniform(0.90, 0.98))
+        # Phase 4 (integration) — shell → sink using {finish_tx}
+        amt4  = amt3 * float(rng.uniform(0.90, 0.98))
         prior = dict(graph.graph[shell][sink]) if graph.graph.has_edge(shell, sink) else None
         graph.graph.add_edge(shell, sink, amount=amt4,
             timestamp=base_ts + (n_mules * 2) * 7200 + 2 * 86400,
-            transaction_type="swift", jurisdiction=graph.graph.nodes[sink].get("jurisdiction", "US"),
+            transaction_type="{finish_tx}",
+            jurisdiction=graph.graph.nodes[sink].get("jurisdiction", "US"),
             suspicion_weight=float(rng.uniform(0.65, 0.85)), scheme_id=scheme_id)
         edges.append({{"src": shell, "tgt": sink, "prior": prior}})
         full_path = [source] + mules + [exchange, shell, sink]
