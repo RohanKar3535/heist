@@ -157,20 +157,46 @@ def step_push_hf_space():
         "f1_history.json",
     ]
 
+    HF_YAML = (
+        "---\n"
+        "title: HEIST\n"
+        "emoji: 🕵️\n"
+        "colorFrom: red\n"
+        "colorTo: purple\n"
+        "sdk: streamlit\n"
+        'sdk_version: "1.32.0"\n'
+        "app_file: src/streamlit_app.py\n"
+        "pinned: true\n"
+        "---\n\n"
+    )
+
     for fname in text_files:
         src = os.path.join(ROOT, fname)
-        if os.path.exists(src):
-            try:
-                api.upload_file(
-                    path_or_fileobj=src,
-                    path_in_repo=fname,
-                    repo_id=repo_id,
-                    repo_type=repo_type,
-                    commit_message=f"Update {fname}",
-                )
-                print(f"  ✅ {fname}")
-            except Exception as e:
-                print(f"  [WARN] {fname}: {e}")
+        if not os.path.exists(src):
+            continue
+        try:
+            if fname == "README.md":
+                # HF Space README must have YAML front matter
+                with open(src, encoding="utf-8") as f:
+                    body = f.read()
+                if not body.startswith("---"):
+                    body = HF_YAML + body
+                import tempfile
+                with tempfile.NamedTemporaryFile(mode="w", suffix=".md",
+                                                 delete=False, encoding="utf-8") as tmp:
+                    tmp.write(body)
+                    upload_src = tmp.name
+                api.upload_file(path_or_fileobj=upload_src, path_in_repo=fname,
+                                repo_id=repo_id, repo_type=repo_type,
+                                commit_message="Update README.md")
+                os.unlink(upload_src)
+            else:
+                api.upload_file(path_or_fileobj=src, path_in_repo=fname,
+                                repo_id=repo_id, repo_type=repo_type,
+                                commit_message=f"Update {fname}")
+            print(f"  ✅ {fname}")
+        except Exception as e:
+            print(f"  [WARN] {fname}: {e}")
 
     # Upload charts/ folder (PNGs — uses Xet storage automatically)
     charts_src = os.path.join(ROOT, "charts")
