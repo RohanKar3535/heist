@@ -36,6 +36,9 @@ train = [
     "datasets>=2.18.0",
 ]
 
+[project.scripts]
+server = "server.app:main"
+
 [tool.setuptools]
 include-package-data = true
 packages = ["heist", "heist.env", "heist.env.server", "heist.agents", "heist.train"]
