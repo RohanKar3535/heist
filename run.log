@@ -1,0 +1,21 @@
+======================================================================
+HEIST GRPO Training — Qwen2.5-1.5B (4-bit Unsloth)
+======================================================================
+  Episodes:      51
+  GRPO G:        8 rollouts/prompt
+  LR:            5e-06
+  Codex update:  every 5 episodes
+  Checkpoint:    every 10 episodes -> /tmp/checkpoints
+
+🦥 Unsloth: Will patch your computer to enable 2x faster free finetuning.
+🦥 Unsloth Zoo will now patch everything to make training faster!
+[1] Loading Qwen2.5-1.5B with Unsloth 4-bit quantization...
+==((====))==  Unsloth 2026.4.8: Fast Qwen2 patching. Transformers: 5.5.0.
+   \\   /|    Tesla T4. Num GPUs = 2. Max memory: 14.563 GB. Platform: Linux.
+O^O/ \_/ \    Torch: 2.10.0+cu128. CUDA: 7.5. CUDA Toolkit: 12.8. Triton: 3.6.0
+\        /    Bfloat16 = FALSE. FA [Xformers = 0.0.35. FA2 = False]
+ "-____-"     Free license: http://github.com/unslothai/unsloth
+Unsloth: Fast downloading is enabled - ignore downloading bars which are red colored!
+Loading weights:   0%|          | 0/339 [00:00<?, ?it/s]Loading weights:   0%|          | 1/339 [00:01<06:34,  1.17s/it]Loading weights:   1%|          | 2/339 [00:01<03:28,  1.61it/s]Loading weights:  12%|█▏        | 39/339 [00:01<00:06, 45.58it/s]Loading weights:  22%|██▏       | 76/339 [00:01<00:02, 92.45it/s]Loading weights:  34%|███▎      | 114/339 [00:01<00:01, 141.80it/s]Loading weights: 100%|██████████| 339/339 [00:01<00:00, 194.20it/s]
+Unsloth 2026.4.8 patched 28 layers with 28 QKV layers, 28 O layers and 28 MLP layers.
+`use_return_dict` is deprecated! Use `return_dict` instead!

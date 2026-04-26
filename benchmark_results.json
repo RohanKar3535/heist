@@ -1,0 +1,1 @@
+{"comparison": {"random": {"avg_f1": 0.14, "avg_r_inv": 0.1}, "rules": {"avg_f1": 0.3, "avg_r_inv": 0.22}, "trained": {"avg_f1": 0.571, "avg_r_inv": 0.249}, "zero_day": {"avg_f1": 0.29, "avg_r_inv": 0.18}}}
