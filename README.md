@@ -9,7 +9,7 @@
 |---|---|
 | 🤗 **HF Space (live demo)** | https://huggingface.co/spaces/Rohan333555/heist-demo |
 | 📝 **Blog writeup** | [BLOG.md](https://huggingface.co/spaces/Rohan333555/heist-demo/blob/main/BLOG.md) |
-| 📓 **Training notebook (Colab)** | [heist_colab.ipynb](https://huggingface.co/spaces/Rohan333555/heist-demo/blob/main/heist_colab.ipynb) |
+| 📓 **Training notebook (Colab)** | [heist_colab.ipynb](https://colab.research.google.com/drive/1ddT9HFzd10LGQ36Rb9en8vq6eDKFBUJM?usp=sharing) |
 | 🐙 **GitHub** | https://github.com/RohanKar3535/heist |
 
 ---
