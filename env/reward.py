@@ -243,6 +243,48 @@ def r_investigator(
 
 
 # ---------------------------------------------------------------------------
+# 1b. R_investigator (HER variant — hindsight relabeled ground truth)
+# ---------------------------------------------------------------------------
+
+def r_investigator_hindsight(
+    evidence_chain: List[str],
+    virtual_ground_truth: List[str],
+    compliance_score: float,
+    queries_used: int,
+    total_budget: int,
+    query_history: List[Dict[str, Any]],
+    graph: "TransactionGraph",
+    scheme_type: str = "hindsight",
+    weights: Optional[Dict[str, float]] = None,
+) -> Dict[str, Any]:
+    """
+    HER variant of R_investigator — uses a virtual (relabeled) ground truth.
+
+    Identical to r_investigator() but:
+      - is_codex_generated is always False (hindsight goals aren't codex schemes)
+      - scheme_type defaults to "hindsight" for logging clarity
+      - tagged with "is_hindsight": True in output
+
+    Used by train/her.py to recompute rewards for failed episodes with
+    relabeled goals (Andrychowicz et al., 2017).
+    """
+    result = r_investigator(
+        evidence_chain=evidence_chain,
+        ground_truth_path=virtual_ground_truth,
+        compliance_score=compliance_score,
+        queries_used=queries_used,
+        total_budget=total_budget,
+        query_history=query_history,
+        graph=graph,
+        scheme_type=scheme_type,
+        is_codex_generated=False,
+        weights=weights,
+    )
+    result["is_hindsight"] = True
+    return result
+
+
+# ---------------------------------------------------------------------------
 # 2. R_criminal
 # ---------------------------------------------------------------------------
 

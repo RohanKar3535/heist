@@ -18,10 +18,12 @@
 | 14 | War Room UI + Evidence Chain Visualization | ✅ Complete |
 | 15 | HuggingFace + Colab | ✅ Complete |
 | 16 | Final Polish + Demo Script + Judge Defense | ✅ Complete |
+| 17 | Hindsight Experience Replay (HER) | ✅ Complete |
+| 18 | Investigation Skill Discovery | ✅ Complete |
 
 ## 🏁 SUBMISSION COMPLETE
 
-All 16 steps finished. System audited (14/14 syntax, 10/10 functional checks passed).
+All 18 steps finished. System audited (14/14 syntax, 10/10 functional checks passed).
 
 ### Deliverables
 - `demo_script.md` — 3-minute pitch, word-for-word

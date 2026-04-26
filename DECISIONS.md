@@ -44,3 +44,9 @@ Reason: Makes Theme 2 long-horizon planning visible. Before/after is devastating
 
 D15: Why GRPO not PPO or DPO
 Reason: No value function needed. PPO collapses on sparse 50-step episodes. DPO needs curated pairs which don't exist for novel adversarial schemes.
+
+D16: Hindsight Experience Replay (HER) for sparse reward
+Reason: Most episodes fail (F1 < 0.5). Standard GRPO wastes these — near-zero gradient signal. HER relabels the ground truth to match the agent's actual investigation path, converting every failed episode into training signal. Novel application: HER has never been applied to LLM tool-use agents. Virtual goals must form connected subgraphs (not just random entity sets) — this is the key adaptation for graph-structured environments.
+
+D17: Investigation Skill Discovery via frequent subsequence mining
+Reason: Successful investigations share common action patterns (e.g., "query → trace → trace → cross-ref"). Mining these patterns and injecting them into the system prompt as advisory strategies gives the agent reusable investigation playbooks. Reusability angle: other tool-augmented RL projects can import HEIST's discovered skills library. Based on Options Framework (Sutton et al., 1999).

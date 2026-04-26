@@ -63,6 +63,8 @@ R_oversight = anomalies_caught / anomalies_total
 5. Suspicious Path Detection (learned Bellman-Ford on transaction graph)
 6. Shapley Value Attribution
 7. Graph Edit Distance (novelty measurement for Criminal Codex and Zero-Day)
+8. Hindsight Experience Replay (Andrychowicz et al., 2017) — adapted for LLM tool-use agents with graph-structured virtual goals
+9. Frequent Subsequence Mining for investigation skill discovery (Options Framework, Sutton et al., 1999)
 
 ## Themes Targeted
 Theme 1: Multi-Agent (4 agents opposing reward functions)
@@ -93,3 +95,5 @@ Step 13: Evaluation + Zero-Day Reveal + Rule-Based Baseline + Graph Edit Distanc
 Step 14: Investigation War Room UI + Evidence Chain Visualization
 Step 15: HuggingFace + Colab
 Step 16: Final Polish + Demo Script + Judge Defense Q&A
+Step 17: Hindsight Experience Replay (HER) — recycles failed episodes into training signal
+Step 18: Investigation Skill Discovery — mines reusable patterns from successful episodes

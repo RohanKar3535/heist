@@ -35,7 +35,9 @@ Built for the Hackathon Finals.
 1. **Criminal Codex**: The criminal agent writes real, executable Python code to generate new attack schemes during training, expanding its attack catalog dynamically.
 2. **Mid-Episode Morphing**: Stackelberg game mechanics. If the investigator gets too close (P(criminal) > 0.7), the criminal morphs the scheme mid-episode, evading detection.
 3. **Red Queen Curriculum**: Softmax weakness targeting. As the investigator improves, the criminal exponentially targets the scheme types where the investigator F1 score is lowest.
-4. **Investigation War Room**: Streamlit-based UI with interactive pyvis graph exploration, evidence chain tracking, Bayesian belief bars, and zero-day testing.
+4. **Hindsight Experience Replay**: Failed investigations are recycled into training signal by relabeling ground truth to match the agent's actual investigation path. First-ever application of HER to LLM tool-use agents.
+5. **Investigation Skill Discovery**: Reusable investigation patterns are automatically mined from successful episodes and injected into the agent's strategy. Based on the Options Framework (Sutton et al., 1999).
+6. **Investigation War Room**: Streamlit-based UI with interactive pyvis graph exploration, evidence chain tracking, Bayesian belief bars, and zero-day testing.
 
 ---
 

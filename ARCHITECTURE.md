@@ -18,6 +18,8 @@ heist/
   train/
     train_grpo.py           — GRPO training with TRL + Unsloth
     curriculum.py           — Red Queen curriculum + ELO tracker
+    her.py                  — Hindsight Experience Replay for sparse reward
+    skills.py               — Investigation skill discovery + prompt injection
   eval/
     evaluate.py             — Evaluation + Zero-Day Reveal + rule baseline + edit distance
   ui/

@@ -27,8 +27,14 @@ try:
     from ..models import InvestigatorAction, HeistObservation
     from ..heist_env import HeistEnvironment
 except (ImportError, ModuleNotFoundError):
-    from models import InvestigatorAction, HeistObservation
-    from heist_env import HeistEnvironment
+    try:
+        from models import InvestigatorAction, HeistObservation
+        from heist_env import HeistEnvironment
+    except (ImportError, ModuleNotFoundError):
+        import sys, os
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+        from models import InvestigatorAction, HeistObservation
+        from heist_env import HeistEnvironment
 
 
 # ---------------------------------------------------------------------------

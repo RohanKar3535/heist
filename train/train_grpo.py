@@ -89,6 +89,8 @@ from heist_env import HeistEnvironment
 from models import InvestigatorAction, ActionType
 from reward import r_investigator
 from curriculum import RedQueenCurriculum
+from her import HindsightReplayBuffer
+from skills import SkillLibrary
 
 # ---------------------------------------------------------------------------
 # Config
@@ -133,7 +135,7 @@ _ACTION_MAP = {
 # Prompt / response formatting
 # ---------------------------------------------------------------------------
 
-SYSTEM_PROMPT = (
+SYSTEM_PROMPT_BASE = (
     "You are an elite AML investigator. Analyze the observation and choose ONE action.\n"
     "Available actions: " + ", ".join(ACTION_VOCAB) + ".\n\n"
     "PHASE STRATEGY:\n"
@@ -148,6 +150,10 @@ SYSTEM_PROMPT = (
     "  ACTION:<action_name> ENTITY:<entity_id>\n"
     "  OR for SAR: ACTION:file_SAR ENTITIES:<e1>,<e2>,<e3>,<e4>,<e5>"
 )
+
+# Dynamic system prompt = base + discovered skills (injected by SkillLibrary)
+# Updated every mine_every episodes when new skills are discovered.
+SYSTEM_PROMPT = SYSTEM_PROMPT_BASE
 
 
 def obs_to_prompt(obs_dict: Dict[str, Any]) -> str:
@@ -744,6 +750,14 @@ def train(
     curriculum = RedQueenCurriculum()
     print("  RedQueenCurriculum loaded (ELO-driven scheme selection).")
 
+    # Hindsight Experience Replay (converts failed episodes into training signal)
+    her = HindsightReplayBuffer(k_hindsight=3, f1_threshold=0.5, max_group_size=16)
+    print("  HindsightReplayBuffer loaded (k=3, threshold=0.5).")
+
+    # Skill Discovery (mines reusable investigation patterns)
+    skill_library = SkillLibrary(min_support=0.6, min_length=3, max_skills=8, mine_every=10)
+    print("  SkillLibrary loaded (support=0.6, mine_every=10).")
+
     # Compliance Expert (preference drift — wired into run_rollout compliance score)
     expert = None
     try:
@@ -821,6 +835,32 @@ def train(
         if not rollouts:
             print(f"  [ERROR] All rollouts failed at ep={ep} — skipping episode")
             continue
+
+        # ── HER: generate hindsight rollouts from failed episodes ──────
+        # Failed rollouts (F1 < 0.5) get K=3 virtual relabelings where the
+        # ground truth is replaced with the entities the agent actually
+        # investigated.  This converts wasted episodes into gradient signal.
+        her_count = 0
+        gt = env._graph.ground_truth.get(env.state.scheme_id, {})
+        gt_path = list(gt.get("full_path", []))
+        for rollout in list(rollouts):  # iterate over copy
+            if her.should_relabel(rollout):
+                hindsight = her.generate_hindsight_rollouts(
+                    rollout=rollout,
+                    graph=env._graph,
+                    ground_truth_path=gt_path,
+                    query_history=env.state.query_history,
+                    total_budget=50,
+                )
+                rollouts.extend(hindsight)
+                her_count += len(hindsight)
+        # Cap group size to prevent compute blowup
+        if len(rollouts) > her.max_group_size:
+            # Keep top rollouts by r_inv (real + hindsight mixed)
+            rollouts.sort(key=lambda x: x["r_inv"], reverse=True)
+            rollouts = rollouts[:her.max_group_size]
+        if her_count > 0 and verbose:
+            print(f"  [HER] +{her_count} hindsight rollouts (group={len(rollouts)})")
 
         # Use best rollout for logging (mean r_inv across group)
         mean_r_inv = float(np.mean([r["r_inv"] for r in rollouts]))
@@ -916,6 +956,31 @@ def train(
         except Exception as _cur_err:
             print(f"  [WARN] curriculum.update ep={ep} failed: {_cur_err} — skipped")
 
+        # ── Skill Discovery: record episode + periodic mining ──────────
+        action_log = best_rollout.get("action_counts", {})
+        action_seq = []
+        for comp in best_rollout.get("completions", []):
+            import re as _re
+            m = _re.search(r"ACTION:(\w+)", comp)
+            if m:
+                action_seq.append(m.group(1))
+        skill_library.record_episode(
+            action_sequence=action_seq,
+            f1=best_rollout["f1"],
+            scheme_type=best_rollout.get("scheme_type", ""),
+        )
+        if ep % skill_library.mine_every == 0 and ep > 0:
+            new_skills = skill_library.mine_skills(current_episode=ep)
+            if new_skills:
+                # Inject discovered skills into the system prompt
+                global SYSTEM_PROMPT
+                SYSTEM_PROMPT = SYSTEM_PROMPT_BASE + skill_library.get_skill_prompt_injection()
+                if verbose:
+                    print(f"  [Skills] Discovered {len(new_skills)} new skills:")
+                    for ns in new_skills:
+                        print(f"    → {ns.name} (support={ns.support:.0%}, F1={ns.avg_f1:.2f})")
+                skill_library.save()
+
         # ── Log ────────────────────────────────────────────────────────
         episode_results.append(best_rollout)
         _append_csv(LOG_CSV, ep, {**best_rollout, "r_inv": mean_r_inv})
@@ -949,11 +1014,25 @@ def train(
 
     # ── Save reward curve ──────────────────────────────────────────────
     _save_curves(CURVES_PATH, curves)
+    skill_library.save()
     print(f"\n[4] Training complete.")
     print(f"  Reward curve saved to {CURVES_PATH}")
     print(f"  Per-scheme F1 log  saved to {LOG_CSV}")
     if use_model:
         print(f"  Checkpoints in {OUT_DIR}")
+
+    # ── HER summary ────────────────────────────────────────────────────
+    her_stats = her.stats
+    if her_stats["total_generated"] > 0:
+        print(f"\n  [HER] Summary:")
+        print(f"    Total hindsight rollouts generated: {her_stats['total_generated']}")
+        print(f"    Source episodes relabeled:          {her_stats['total_source_episodes']}")
+        print(f"    Average virtual F1:                 {her_stats['avg_virtual_f1']:.3f}")
+
+    # ── Skill Discovery summary ────────────────────────────────────────
+    if skill_library.skills:
+        print(f"\n  [Skills] Final skill library:")
+        print(skill_library.summary())
 
     # ── Interpretability summary ───────────────────────────────────────
     entropies = [r.get("action_entropy", 0.0) for r in episode_results if r.get("action_entropy") is not None]
