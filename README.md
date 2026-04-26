@@ -5,7 +5,12 @@
 
 > *"An AI detective and an AI criminal. Neither has hardcoded knowledge. The criminal writes its own attack code in Python. Both co-evolve across 100 episodes. At the end, the criminal synthesizes a Zero-Day laundering pattern no human designed — a novel attack engineered from the agent's own failure modes."*
 
-📝 **Blog writeup**: [BLOG.md](https://huggingface.co/spaces/Rohan333555/heist-demo/blob/main/BLOG.md)
+| | |
+|---|---|
+| 🤗 **HF Space (live demo)** | https://huggingface.co/spaces/Rohan333555/heist-demo |
+| 📝 **Blog writeup** | [BLOG.md](https://huggingface.co/spaces/Rohan333555/heist-demo/blob/main/BLOG.md) |
+| 📓 **Training notebook (Colab)** | [heist_colab.ipynb](https://huggingface.co/spaces/Rohan333555/heist-demo/blob/main/heist_colab.ipynb) |
+| 🐙 **GitHub** | https://github.com/RohanKar3535/heist |
 
 ---
 
