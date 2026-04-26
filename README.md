@@ -223,6 +223,28 @@ Features:
 
 ---
 
+
+
+## 📊 Training Charts
+
+### F1 & Reward Training Curve
+![Training Curve](charts/01_training_curve.png)
+
+### Red Queen ELO Leaderboard
+![ELO Leaderboard](charts/02_elo_leaderboard.png)
+
+### Investigator Weakness Heatmap
+![Weakness Heatmap](charts/03_weakness_heatmap.png)
+
+### Baseline Comparison
+![Baseline Comparison](charts/04_baseline_comparison.png)
+
+### Episode Distribution by Scheme Type
+![Scheme Distribution](charts/05_scheme_distribution.png)
+
+### Criminal vs Investigator ELO Arms Race
+![ELO Arms Race](charts/06_criminal_elo_race.png)
+
 ## 🛠️ Setup
 
 ```bash
